@@ -12,52 +12,15 @@
 
 ## 选一种接入方式
 
+最简单的做法是按官网 [Agent 接入](https://www.rooyun.com/developers?utm_source=github&utm_medium=readme) 页操作：把那一页发给你的 AI 编程助手，它会自己装好、自己登录。下面是同样的几种方式，前两种直接从官网安装，不需要 GitHub。
+
 | 方式 | 适合谁 | 怎么用 |
 |---|---|---|
-| **Claude Code 插件**（推荐） | 用 Claude Code 的人 | 两条命令装好，以后随插件更新 |
-| **手动安装 Skill** | Codex、WorkBuddy 等任何有 shell 的 Agent | 把 skill 目录拷进技能目录 |
-| **远程 MCP** | Cursor、Cline、Cherry Studio 等 MCP 客户端 | 填一个 URL 和一枚令牌 |
+| **远程 MCP** | Claude Code、Cursor、Cline 等 MCP 客户端 | 填一个 URL 和一枚令牌 |
+| **从官网安装 Skill** | Claude Code、Codex、WorkBuddy 等任何有 shell 的 Agent | 一条命令下载解压 |
+| **Claude Code 插件**（可选） | 想用插件方式管理、随插件更新的 Claude Code 用户 | 从本仓库安装，内容与官网下载一致 |
 
-### 1. Claude Code 插件
-
-```bash
-claude plugin marketplace add DeepHiveAI/rooyun-skill
-claude plugin install rooyun@rooyun
-```
-
-装好后对 Claude 说「用 RooYun 把这个剧本搭成画布工程」。第一次使用时，它会运行登录命令并打开浏览器，你在 RooYun 页面点一次「授权」即可，令牌保存在本机 `~/.rooyun/credentials.json`。
-
-本仓库提供三个插件，**`rooyun` 和 `rooyun-cli` 二选一**（两者都会响应「用 RooYun 生成…」，同时装会抢着触发）：
-
-| 插件 | 内容 |
-|---|---|
-| `rooyun` | 完整版：按「剧本 → 角色/场景/道具 → 分镜 → 定嗓 → 生成」的固定流程搭工程，带 15 条工作流纪律 |
-| `rooyun-cli` | 精简版：只给能力地图，提示词和先后顺序由你决定，提示词原样提交 |
-| `rooyun-mcp` | 只接远程 MCP 服务，安装时填入令牌，适合想用 MCP 工具而不是 skill 的人 |
-
-更新：
-
-```bash
-claude plugin marketplace update rooyun
-claude plugin update rooyun@rooyun
-```
-
-### 2. 手动安装 Skill
-
-Skill 在 [`plugins/rooyun/skills/rooyun/`](plugins/rooyun/skills/rooyun/)（精简版在 [`plugins/rooyun-cli/skills/rooyun-cli/`](plugins/rooyun-cli/skills/rooyun-cli/)），把整个目录拷进你的技能目录：
-
-```bash
-git clone https://github.com/DeepHiveAI/rooyun-skill.git
-mkdir -p ~/.claude/skills
-cp -R rooyun-skill/plugins/rooyun/skills/rooyun ~/.claude/skills/
-node ~/.claude/skills/rooyun/scripts/dj.mjs login
-```
-
-Codex 等读 `AGENTS.md` 的工具：把 [`AGENTS.snippet.md`](plugins/rooyun/skills/rooyun/AGENTS.snippet.md) 粘进项目的 `AGENTS.md`。完整的安装、权限和环境变量说明见 skill 自带的 [README](plugins/rooyun/skills/rooyun/README.md)。
-
-命令行工具 `scripts/dj.mjs` 零依赖，需要 Node.js 18 或更高版本，macOS、Linux、Windows 通用。
-
-### 3. 远程 MCP
+### 1. 远程 MCP
 
 服务地址：`https://www.rooyun.com/api/mcp`（Streamable HTTP），鉴权头 `Authorization: Bearer <令牌>`。令牌在 [个人中心 → API 访问](https://www.rooyun.com/profile#api) 创建。
 
@@ -66,6 +29,39 @@ claude mcp add --transport http rooyun https://www.rooyun.com/api/mcp --header "
 ```
 
 Cursor、Codex、Cline、Cherry Studio 等客户端的配置见 [docs/mcp-clients.md](docs/mcp-clients.md)。
+
+### 2. 从官网安装 Skill
+
+Skill 比 MCP 多了本地脚本：能上传本地素材、批量下载产物、在本地拼接成片。有完整版和精简版，**二选一安装**（两者都会响应「用 RooYun 生成…」，同时装会抢着触发）：
+
+- **完整版 `rooyun`**：按「剧本 → 角色/场景/道具 → 分镜 → 定嗓 → 生成」的固定流程搭工程，带 15 条工作流纪律。
+- **精简版 `rooyun-cli`**：只给能力地图，提示词和先后顺序由你决定，提示词原样提交。
+
+```bash
+# 完整版（精简版把地址换成 "https://www.rooyun.com/api/skill/bundle?variant=cli"）
+curl -fL "https://www.rooyun.com/api/skill/bundle" -o rooyun-skill.zip
+mkdir -p ~/.claude/skills
+unzip -o rooyun-skill.zip -d ~/.claude/skills
+```
+
+装好后重启 Claude Code，对它说「登录 RooYun」：它会运行登录命令并打开浏览器，你在 RooYun 页面点一次「授权」即可，令牌保存在本机 `~/.rooyun/credentials.json`。之后用 `node ~/.claude/skills/rooyun/scripts/dj.mjs update` 更新。
+
+Codex 等读 `AGENTS.md` 的工具：把 [`AGENTS.snippet.md`](plugins/rooyun/skills/rooyun/AGENTS.snippet.md) 粘进项目的 `AGENTS.md`。完整的安装、权限和环境变量说明见 skill 自带的 [README](plugins/rooyun/skills/rooyun/README.md)。命令行工具 `scripts/dj.mjs` 零依赖，需要 Node.js 18 或更高版本，macOS、Linux、Windows 通用。
+
+### 3. Claude Code 插件（可选）
+
+和官网下载的是同一份 Skill，区别只是用插件命令安装和更新：
+
+```bash
+claude plugin marketplace add DeepHiveAI/rooyun-skill
+claude plugin install rooyun@rooyun        # 精简版：rooyun-cli@rooyun
+```
+
+更新：`claude plugin marketplace update rooyun`，再 `claude plugin update rooyun@rooyun`。
+
+本仓库还提供 `rooyun-mcp` 插件，只接上面的远程 MCP，安装时按提示填入令牌（保存在系统安全存储里）。
+
+也可以不装插件，直接把 [`plugins/rooyun/skills/rooyun/`](plugins/rooyun/skills/rooyun/) 整个目录拷进 `~/.claude/skills/`，效果和从官网安装一样。
 
 ---
 

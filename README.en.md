@@ -12,33 +12,13 @@ The skill content, prompts and canvas are in Chinese. Agents work fine with it i
 
 ## Install
 
+The easiest way is the official [Agent access page](https://www.rooyun.com/developers?utm_source=github&utm_medium=readme-en) (Chinese): send that page to your AI coding agent and it installs and logs in by itself. The first two options below install straight from rooyun.com and do not need GitHub.
+
 | Option | For | How |
 |---|---|---|
-| **Claude Code plugin** (recommended) | Claude Code users | Two commands, updates with the plugin |
-| **Manual skill install** | Codex, WorkBuddy, any agent with a shell | Copy the skill folder |
-| **Remote MCP** | Cursor, Cline, Cherry Studio and other MCP clients | One URL plus an API token |
-
-### Claude Code plugin
-
-```bash
-claude plugin marketplace add DeepHiveAI/rooyun-skill
-claude plugin install rooyun@rooyun
-```
-
-On first use the agent runs the login command and opens your browser. Click "授权" (Authorize) on the RooYun page once; the token is saved to `~/.rooyun/credentials.json`.
-
-Install **either `rooyun` or `rooyun-cli`, not both**. `rooyun` is the full guided workflow (script → characters/scenes/props → shots → voices → generation). `rooyun-cli` is the free-form toolbox that sends your prompts verbatim. `rooyun-mcp` connects only the remote MCP server.
-
-### Manual skill install
-
-```bash
-git clone https://github.com/DeepHiveAI/rooyun-skill.git
-mkdir -p ~/.claude/skills
-cp -R rooyun-skill/plugins/rooyun/skills/rooyun ~/.claude/skills/
-node ~/.claude/skills/rooyun/scripts/dj.mjs login
-```
-
-`scripts/dj.mjs` has no dependencies and needs Node.js 18 or later.
+| **Remote MCP** | Claude Code, Cursor, Cline and other MCP clients | One URL plus an API token |
+| **Skill from rooyun.com** | Claude Code, Codex, WorkBuddy, any agent with a shell | One download command |
+| **Claude Code plugin** (optional) | Claude Code users who prefer plugin-managed updates | Install from this repository; same content as the download |
 
 ### Remote MCP
 
@@ -49,6 +29,30 @@ claude mcp add --transport http rooyun https://www.rooyun.com/api/mcp --header "
 ```
 
 See [docs/mcp-clients.md](docs/mcp-clients.md) for Cursor, Codex, Cline and Cherry Studio.
+
+### Skill from rooyun.com
+
+The skill adds local scripts on top of the API: upload local assets, batch-download results and stitch clips locally. Install **either the full `rooyun` skill or the free-form `rooyun-cli`, not both**.
+
+```bash
+# Full version (for rooyun-cli use "https://www.rooyun.com/api/skill/bundle?variant=cli")
+curl -fL "https://www.rooyun.com/api/skill/bundle" -o rooyun-skill.zip
+mkdir -p ~/.claude/skills
+unzip -o rooyun-skill.zip -d ~/.claude/skills
+```
+
+Restart Claude Code and ask it to log in to RooYun. It runs the login command and opens your browser; click "授权" (Authorize) once and the token is saved to `~/.rooyun/credentials.json`. `scripts/dj.mjs` has no dependencies and needs Node.js 18 or later.
+
+### Claude Code plugin (optional)
+
+Same skill as the download, installed and updated through Claude Code's plugin commands:
+
+```bash
+claude plugin marketplace add DeepHiveAI/rooyun-skill
+claude plugin install rooyun@rooyun        # or rooyun-cli@rooyun
+```
+
+`rooyun-mcp` connects only the remote MCP server and asks for your token on install.
 
 ## Billing and safety
 
