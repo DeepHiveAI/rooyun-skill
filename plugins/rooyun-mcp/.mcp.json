@@ -1,0 +1,11 @@
+{
+  "mcpServers": {
+    "rooyun": {
+      "type": "http",
+      "url": "https://www.rooyun.com/api/mcp",
+      "headers": {
+        "Authorization": "Bearer ${user_config.api_token}"
+      }
+    }
+  }
+}

@@ -1,0 +1,27 @@
+{
+  "name": "rooyun",
+  "displayName": "RooYun",
+  "version": "1.40.1",
+  "description": "用自然语言驱动 RooYun 的 AI 漫剧 / AI 短剧创作工作台：剧本拆角色和分镜、生成分镜图与视频、产物落回无限画布",
+  "author": {
+    "name": "RooYun",
+    "url": "https://www.rooyun.com"
+  },
+  "homepage": "https://www.rooyun.com/developers?utm_source=github&utm_medium=plugin",
+  "repository": "https://github.com/DeepHiveAI/rooyun-skill",
+  "license": "MIT",
+  "icon": "./.claude-plugin/icon.png",
+  "documentationUrl": "https://www.rooyun.com/developers?utm_source=github&utm_medium=plugin",
+  "supportUrl": "https://github.com/DeepHiveAI/rooyun-skill/issues",
+  "privacyPolicyUrl": "https://www.rooyun.com/privacy",
+  "termsOfServiceUrl": "https://www.rooyun.com/terms",
+  "keywords": [
+    "rooyun",
+    "ai-drama",
+    "short-drama",
+    "storyboard",
+    "video-generation",
+    "AI漫剧",
+    "AI短剧"
+  ]
+}

@@ -1,0 +1,26 @@
+{
+  "$schema": "https://static.modelcontextprotocol.io/schemas/2025-12-11/server.schema.json",
+  "name": "com.rooyun/rooyun",
+  "title": "RooYun",
+  "description": "AI comic & short-drama studio: scripts to storyboards, image/video generation on an infinite canvas",
+  "version": "1.40.1",
+  "websiteUrl": "https://www.rooyun.com/developers?utm_source=mcp-registry",
+  "repository": {
+    "url": "https://github.com/DeepHiveAI/rooyun-skill",
+    "source": "github"
+  },
+  "remotes": [
+    {
+      "type": "streamable-http",
+      "url": "https://www.rooyun.com/api/mcp",
+      "headers": [
+        {
+          "name": "Authorization",
+          "description": "Bearer <RooYun API token>, create one at https://www.rooyun.com/profile#api",
+          "isRequired": true,
+          "isSecret": true
+        }
+      ]
+    }
+  ]
+}

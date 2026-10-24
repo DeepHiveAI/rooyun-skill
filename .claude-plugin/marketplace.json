@@ -1,0 +1,24 @@
+{
+  "name": "rooyun",
+  "description": "RooYun：AI 漫剧 / AI 短剧创作工作台的 Claude Code 插件",
+  "owner": {
+    "name": "RooYun"
+  },
+  "plugins": [
+    {
+      "name": "rooyun",
+      "source": "./plugins/rooyun",
+      "description": "完整版 skill：按「剧本 → 角色/场景/道具 → 分镜 → 生成」的流程在 RooYun 画布上搭 AI 漫剧工程（与 rooyun-cli 二选一）"
+    },
+    {
+      "name": "rooyun-cli",
+      "source": "./plugins/rooyun-cli",
+      "description": "精简版 skill：只给能力地图，提示词原样提交，流程由你决定（与 rooyun 二选一）"
+    },
+    {
+      "name": "rooyun-mcp",
+      "source": "./plugins/rooyun-mcp",
+      "description": "只接 RooYun 远程 MCP 服务，安装时填入 API 令牌"
+    }
+  ]
+}

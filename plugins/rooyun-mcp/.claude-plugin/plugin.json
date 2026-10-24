@@ -1,0 +1,36 @@
+{
+  "name": "rooyun-mcp",
+  "displayName": "RooYun MCP",
+  "version": "1.40.1",
+  "description": "连接 RooYun 远程 MCP 服务（https://www.rooyun.com/api/mcp），在任意会话里调用建画布、生成、取产物等工具",
+  "author": {
+    "name": "RooYun",
+    "url": "https://www.rooyun.com"
+  },
+  "homepage": "https://www.rooyun.com/developers?utm_source=github&utm_medium=plugin",
+  "repository": "https://github.com/DeepHiveAI/rooyun-skill",
+  "license": "MIT",
+  "icon": "./.claude-plugin/icon.png",
+  "documentationUrl": "https://www.rooyun.com/developers?utm_source=github&utm_medium=plugin",
+  "supportUrl": "https://github.com/DeepHiveAI/rooyun-skill/issues",
+  "privacyPolicyUrl": "https://www.rooyun.com/privacy",
+  "termsOfServiceUrl": "https://www.rooyun.com/terms",
+  "keywords": [
+    "rooyun",
+    "ai-drama",
+    "short-drama",
+    "storyboard",
+    "video-generation",
+    "AI漫剧",
+    "AI短剧"
+  ],
+  "userConfig": {
+    "api_token": {
+      "type": "string",
+      "title": "RooYun API 令牌",
+      "description": "在 https://www.rooyun.com/profile#api 创建，以 dj_pat_ 开头",
+      "required": true,
+      "sensitive": true
+    }
+  }
+}
