@@ -1,6 +1,6 @@
 ---
 name: rooyun-cli
-version: 1.40.1
+version: 1.41.0
 releasedAt: 2026-10-24
 description: RooYun 精简版（CLI 自由模式）：只告诉你终端里的 dj.mjs 能调哪些能力、各产出什么——文生图、图生图/编辑、图生视频、首尾帧、参考图生视频、数字人口播、配音、音乐、音效、视频高清、视频转白模、上传素材、下载产物，以及可选的画布读写和平台 LLM 辅助（提示词优化、参考图/参考片反推提示词、剧本拆解）。不预设创作流程：提示词怎么写、先做什么后做什么、用哪个模型、要不要画布，全由用户决定。当用户说「用 RooYun 生成一张图 / 一段视频」「我自己写提示词」「别走固定流程」「直接调 RooYun 的工具」「rooyun-cli」，或提到 RooYun、ROOYUN_API_TOKEN 且想自己掌控创作时使用。生成会花用户的真钱，任何生成前先报价并等用户确认。
 ---
@@ -88,7 +88,7 @@ dj generate --request-id "$RID" --model … --capability … --params-json '{…
 | 首尾帧视频 | `flf2v` | `firstFrame` + `lastFrame` | 同上 |
 | 参考图生视频 | `ref2v` | 顶层 `--reference`（1–9 张） | 同上；`--reference-audio` 锁音色、`--reference-video` 动作/运镜参考 |
 | 数字人口播 | `avatar` | `drivingAudio`(wav/mp3) + `firstFrame` 或 `motionVideo` | `prompt`、`aspectRatio` |
-| 配音 | `t2a` | `text` + `voiceId`(系统音色) 或 `voiceName`(用户音色)（必填，`dj voices` 挑；不传 = 400） | `speed`、`emotion` |
+| 配音 | `t2a` | `text` + `voiceId`(系统音色) 或 `voiceName`(用户音色)（必填，`dj voices` 挑；不传 = 400）。`provider:"gemini"` 的音色（`kore` 这类预置、`voice_` 开头的设计音色）一律填 `voiceId`，只配 Gemini 模型 | `speed`、`emotion`；Gemini / VoxCPM2 用 `styleText`（一句风格指令，≤100 字、不含括号，Gemini 不认 `emotion`） |
 | 音乐 | `music` | `text` | `lyrics`、`instrumental`、`durationSec` |
 | 音效 | `sfx` | `text` | `durationSec`(0.5–30) |
 | 视频高清 | `upscale` | `video` | `targetResolution`(1080p/2k) |
@@ -97,7 +97,7 @@ dj generate --request-id "$RID" --model … --capability … --params-json '{…
 
 ```sh
 dj models --capability t2i --pretty          # 有哪些模型、单价多少（pricing 为 null = 未配价，提交必被拒）
-dj voices --q 温暖少女 --pretty               # 配音前挑音色（voiceId 原样回传，别 trim）
+dj voices --q 温暖少女 --pretty               # 配音前挑音色（voiceId 原样回传，别 trim；带 expiresAt 的 Gemini 设计音色 30 天到期）
 dj upload ./ref.png                           # 本地素材 → assetId（≤50MB）；所有素材参数都只收 assetId
 RID=$(dj uuid)
 dj generate --request-id "$RID" --model "$MODEL" --capability t2i \

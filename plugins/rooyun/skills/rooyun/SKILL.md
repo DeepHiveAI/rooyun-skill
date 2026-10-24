@@ -1,6 +1,6 @@
 ---
 name: rooyun
-version: 1.40.1
+version: 1.41.0
 releasedAt: 2026-10-24
 description: 用自然语言驱动 RooYun（短剧 AI 创作工作台）的开放 API：建项目与无限画布、按「剧本 → 角色/场景/道具 → 分镜视频卡 → 生成」的固定顺序搭画布、用平台 LLM 把剧本拆成结构化的角色/场景/道具/分镜再落成卡片、调模型生成图片视频音频并自动落回卡片、把一段现成视频转成白模再让新角色复刻它的动作与运镜、反推参考素材的提示词、质检分镜图、下载产物到本地、把抖音视频分享链接解析成可直接下载的视频直链，供本地看片做对标分析；以及选题情报一条链：读每日频道简报（选题 + 「AI 数字人做不做得了」的可执行性判断 + 对标参考）、订阅对标博主并按增速看谁在起来、查热榜与每日选题报告、检索文案库看别人的爆款是怎么写的（钩子/段落节奏/CTA）。当用户说「用 RooYun 生成分镜 / 把我的剧本做成视频工程 / 拆一下这个剧本的角色 / 在 RooYun 里建个项目 / 把这段视频换成我的角色重演 / 下载我 RooYun 项目的产物 / 查我 RooYun 还剩多少积分 / 帮我把这条抖音视频下下来看看 / 抓一下这个抖音博主的视频 / 今天做什么选题 / 帮我盯着这几个对标博主 / 别人这条爆款是怎么写的 / 看看今天的选题简报」，或提到 RooYun、rooyun.com、ROOYUN_API_TOKEN 时使用本技能。生成类会花用户的真钱，任何生成前必须先报价并等用户确认；选题情报那条链全部只读、不扣积分。
 ---
@@ -126,9 +126,11 @@ node ~/.claude/skills/rooyun/scripts/dj.mjs update --pretty
 ```sh
 # ① 整批报价（一次最多 100 项）。-f 的文件形状：
 #    {"items":[{"model":"<模型id>","capability":"t2i","params":{"size":"2k"}}, …]}
-#    也收裸数组 [ …items… ]。注意 precheck 的 params 只认影响价格的四个键：
-#    durationSec / resolution / size / targetResolution（传别的会 400）。
-#    配音 t2a 的 params 留空 {}：计费时长由服务端定（每次调用固定按缺省时长），传了也被忽略
+#    也收裸数组 [ …items… ]。注意 precheck 的 params 只认影响价格的键：
+#    durationSec / resolution / size / targetResolution，以及配音专用的 text / speed / durationFactor
+#    （传别的会 400）。
+#    配音 t2a 要传 text（台词原文，可加 speed）才能拿到按秒的准价——服务端按台词估算时长，
+#    与提交时冻结同一份估算；不传 text 只会按缺省时长报一个不准的数
 node scripts/dj.mjs precheck -f /tmp/batch.json --pretty
 # ② 把「合计 X 积分，本次可用 Y」原样告诉用户（Y 取响应的 available），等一个明确的「继续」
 # ③ 得到确认后才逐条 generate
@@ -702,7 +704,7 @@ node $SKILL/scripts/download.mjs --project <projectId> --out ./out --pretty
 
 | 文件 | 什么时候读 |
 |---|---|
-| [`references/endpoints.md`](references/endpoints.md) | 要调任何端点前；不确定响应长什么样、该用哪个能力词；配音要控情绪/分段（「配音情绪向量」节：先查 `audio.emotionVector`，分段按段数×单次价报价） |
+| [`references/endpoints.md`](references/endpoints.md) | 要调任何端点前；不确定响应长什么样、该用哪个能力词；配音要控情绪/分段（「配音情绪向量」节：先查 `audio.emotionVector`，分段按段数×单次价报价；t2a 报价带 `text`（可加 `speed`）才是按秒准价）；用 Gemini 配音（音色填 `voiceId`、情绪走 `styleText`） |
 | [`references/ops-vocabulary.md`](references/ops-vocabulary.md) | 要写任何画布改动批次；查 `updateCard` 能改哪些字段 |
 | [`references/video-prompt.md`](references/video-prompt.md) | **所有视频生成前必读**——参考编号、台词前缀、限制段 |
 | [`references/voice-consistency.md`](references/voice-consistency.md) | **对白剧集必读**——试镜定嗓，同一角色全剧一把嗓子 |
