@@ -59,6 +59,12 @@ claude plugin install rooyun@rooyun        # 精简版：rooyun-cli@rooyun
 
 更新：`claude plugin marketplace update rooyun`，再 `claude plugin update rooyun@rooyun`。
 
+国内访问 GitHub 慢的话，第一条命令换成 Gitee 镜像，其余不变：
+
+```bash
+claude plugin marketplace add https://gitee.com/yichuanWorks/rooyun-skill.git
+```
+
 本仓库还提供 `rooyun-mcp` 插件，只接上面的远程 MCP，安装时按提示填入令牌（保存在系统安全存储里）。
 
 也可以不装插件，直接把 [`plugins/rooyun/skills/rooyun/`](plugins/rooyun/skills/rooyun/) 整个目录拷进 `~/.claude/skills/`，效果和从官网安装一样。
@@ -101,6 +107,7 @@ claude plugin install rooyun@rooyun        # 精简版：rooyun-cli@rooyun
 ## 关于这个仓库
 
 - 本仓库由 RooYun 主仓库自动同步生成，skill 内容与 `https://www.rooyun.com/api/skill/bundle` 下载到的完全一致。
+- 国内镜像：[gitee.com/yichuanWorks/rooyun-skill](https://gitee.com/yichuanWorks/rooyun-skill)，内容与本仓库相同。
 - 欢迎提 Issue 和 PR。PR 会由维护者手工合回主仓库，再随下一次同步出现在这里，所以合并后不会立刻显示为「已合并」。
 - 远程 MCP 服务端和 RooYun 平台本身不在本仓库中。
 

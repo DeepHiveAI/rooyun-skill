@@ -54,6 +54,8 @@ claude plugin install rooyun@rooyun        # or rooyun-cli@rooyun
 
 `rooyun-mcp` connects only the remote MCP server and asks for your token on install.
 
+In mainland China, add the Gitee mirror instead: `claude plugin marketplace add https://gitee.com/yichuanWorks/rooyun-skill.git`.
+
 ## Billing and safety
 
 Generation spends RooYun credits. The skill requires the agent to show a price quote and wait for your confirmation before every generation, and batch jobs use idempotency keys so retries are not charged twice. Only `dj.mjs` reads the token; you can set a spending cap or revoke it at any time.
