@@ -57,7 +57,7 @@ HTTP 状态码恒为 200**，真实状态码改放在信封的 `meta.httpStatus`
 | `reference_job_active` | 409 | 你（这个账号）的拆解队列满了：1 条在跑 + 3 条排队。**未提交、没有扣费**。`meta.activeJobId` 是在跑的那条、`meta.queued` 是排队数：`dj reference-analysis <activeJobId>` 等它到终态（5–15 分钟）后再发。**不是参数错误**，别放弃也别换令牌绕 |
 | `cancel_unsupported` | 409 | 该任务由上游渠道执行，没有取消通道。诚实告诉用户：等它自然结束，钱照付 |
 | `asset_not_in_cloud` | 404 | 不是 id 错了，是东西没上云 → 请用户在原设备导出 |
-| `download_quota_exceeded` | 429 | 令牌当日下载配额 5 GiB 耗尽（UTC 00:00 重置）。与上面那种 429 不同：**这个等不来**，只能等次日或换令牌。302 的响应头 `x-download-quota-remaining`（当日余额）与 `x-download-grant-remaining`（在途预算余额）可用来提前节流 |
+| `download_quota_exceeded` | 429 | 令牌当日下载配额 5 GiB 耗尽（UTC 00:00 重置）。与上面那种 429 不同：**这个等不来**，只能等次日或换令牌（管理员账号的令牌不受此配额约束，也不回 `x-download-quota-remaining`）。302 的响应头 `x-download-quota-remaining`（当日余额）与 `x-download-grant-remaining`（在途预算余额）可用来提前节流 |
 | `upstream_rejected` | 4xx/5xx | 上游拒绝或暂不可用，`message` 已脱敏 |
 | `llm_upstream_failed` | 502 | 分析端点的上游挂了。**已自动退款**，可直接重试 |
 | `llm_empty_output` | 502 | 上游正常收尾却没吐字。**已自动退款**，可直接重试 |

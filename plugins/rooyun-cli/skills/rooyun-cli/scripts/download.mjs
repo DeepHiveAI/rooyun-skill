@@ -282,7 +282,9 @@ async function attemptDownload(ctx, entry, target, fileName) {
   }
 
   const location = signal.headers.get("location");
-  const quotaRemaining = Number(signal.headers.get("x-download-quota-remaining"));
+  // 头缺失（管理员令牌不受日配额约束）记 NaN，下游按「无余额信息」处理，别当成 0
+  const quotaHeader = signal.headers.get("x-download-quota-remaining");
+  const quotaRemaining = quotaHeader === null ? Number.NaN : Number(quotaHeader);
   if (!location) {
     return { status: "failed", reason: "302 缺少 location 头", file: fileName };
   }
