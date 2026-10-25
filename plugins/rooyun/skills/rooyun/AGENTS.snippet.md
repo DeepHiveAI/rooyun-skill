@@ -1,5 +1,5 @@
 <!--
-  rooyun-skill-version: 1.42.0
+  rooyun-skill-version: 1.43.0
 
   把下面 `## RooYun 开放 API` 整段粘进你项目的 AGENTS.md（Codex）或等价的长期指令文件，
   并把 rooyun-skill/scripts/ 放到 Agent 能执行到的位置（零依赖，Node ≥ 18）。
@@ -126,7 +126,7 @@ node scripts/dj.mjs login   # ② 再跑一次：等待授权（最多 90s），
     （单主体/中性表情/干净影棚/三视图/禁文字），用 `dj node <canvasId> <nodeId>` 读回
     `data.body` 原样提交；自拟会把这些约束整体旁路，而它是后面所有镜头的参考基准。
     视频提示词就是分镜视频卡上的 `prompt`（`createStoryboard kind:"video"` 落卡时来自
-    `segments[].videoPrompt`，含硬切指令与时间码，**对白在「音轨：」行内一字不丢**）：
+    `segments[].videoPrompt`，含硬切指令与镜头时长，**对白在「音轨：」行内一字不丢**）：
     生成前 `dj node` 读回原样提交，自拼最常见的后果就是整片没有对白。
     提交前核三件事：① 提示词里的角色/场景名与卡上的名字逐字一致；② 声明的角色/场景/道具
     都已连上参考图；③ 有对白的镜头对白确实在提示词里。**不要留「她」「那个男人」这类代称**
