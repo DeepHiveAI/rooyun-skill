@@ -1,7 +1,7 @@
 {
   "name": "rooyun-cli",
   "displayName": "RooYun CLI",
-  "version": "1.43.0",
+  "version": "1.44.0",
   "description": "RooYun 精简版：文生图、图生视频、配音等能力的命令行工具箱，提示词原样提交，流程由你决定",
   "author": {
     "name": "RooYun",

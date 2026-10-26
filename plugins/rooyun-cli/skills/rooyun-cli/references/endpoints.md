@@ -203,7 +203,7 @@ dj canvas structure "$CANVAS" | jq -r '.data.nodes[] | select(.title=="镜1 推�
 | `i2i` 图生图/编辑/放大/抠图 | `image` | `prompt`、`operation`(edit/upscale/removebg/look，**`removebg` 要先按 `image.removebg` 挑模型，见下节**)、`size`(1k/2k/4k，决定输出档位与计价倍率，放大请显式给)、`aspectRatio`（放大时与源图一致）、`quality`、`seed` |
 | `i2v` 图生视频 | `firstFrame` | `prompt`、`durationSec`、`resolution`(480p…4k，按模型目录)、`aspectRatio`、`audio` |
 | `flf2v` 首尾帧生视频 | `firstFrame` + `lastFrame` | 同 `i2v` |
-| `ref2v` 参考图生视频 | 顶层 `referenceAssetIds`（≥1，最多 9） | 同 `i2v`、顶层 **`referenceAudioAssetIds`**（锁角色音色，见「角色音色一致性」章）、顶层 **`referenceVideoAssetIds`**（≤3 段，动作/运镜参考，见「白模换角」章） |
+| `ref2v` 参考图生视频 | 顶层 `referenceAssetIds`（≥1，最多 9） | 同 `i2v`、顶层 **`referenceAudioAssetIds`**（锁角色音色，见「角色音色一致性」章；加顶层 `referenceAudioMode: "fully_copy"` 则改为**原样复用这段音频当成片声音**，如唱用户的歌：仅 H3 全参考、恰好一段、≤15 秒，时长跟随音频）、顶层 **`referenceVideoAssetIds`**（≤3 段，动作/运镜参考，见「白模换角」章） |
 | `avatar` 数字人口播 | `drivingAudio` + （`firstFrame` 或 `motionVideo` 至少一个；或管理员的专属数字人 `digitalHumanId`，见下节） | `prompt`、`aspectRatio`（见下节） |
 | `t2a` 配音 | `text` + 音色（`voiceId` 或 `voiceName` 二选一，先 `dj voices` 挑；不传 = 400 不扣费，平台不替你挑默认嗓子） | `speed`、`emotion`、`styleText`、`moodId`、**`emoVector`+`emoAlpha`**（8 维情感向量+强度，成对）、**`durationFactor`**（模型内变速，与 `speed` 互斥）——后三个要先按 `audio` 能力位挑模型，见「配音情绪向量」节。**Gemini 模型**用 `styleText`（一句自然语言风格指令，≤100 字、不含括号）表达情绪与语速，`emotion` 对它不生效；台词里的停顿 `<#0.5#>` 与语气词由服务端转成 Gemini 标签 |
 | `music` 音乐 | `text` | `lyrics`、`instrumental`、`durationSec` |
@@ -349,6 +349,10 @@ VOICE=$(dj voices --q 温暖少女 | jq -r '.data.voices[0].voiceId')
   用户设计音色以 `voice_` 开头。Gemini 音色只能配 Gemini 模型（`dj models --capability t2a`
   里挑 Gemini 的那条），配给别的模型会被拒。带 `expiresAt` 的设计音色**会到期（30 天）**，
   过期后合成失败——长剧集定嗓前先看一眼这个字段。
+- Gemini 系统音色分两类：**30 个经典音色**（`language: "多语种"`，**中文配音只用它们**）和
+  **2000 多个地区音色**（id 形如 `ja-jp-techagent-10`，按语种区分口音，**没有中文**）。
+  地区音色排在目录最末，不带 `--q` 翻首页看不到；要外语口音就按语种圈：
+  `dj voices --q 日语`、`dj voices --q ja-jp`、`dj voices --q 美式英语`。
 
 ⚠️ `voiceId` **原样回传，不要 trim**：个别系统音色 id 带尾随空格，清洗过就不命中了。
 `--q` 是宽匹配（id / 名称 / 语种 / 标签任一命中），所以 `--q mandarin` 能圈出一批

@@ -1,7 +1,7 @@
 ---
 name: rooyun-cli
-version: 1.43.0
-releasedAt: 2026-10-25
+version: 1.44.0
+releasedAt: 2026-10-26
 description: RooYun 精简版（CLI 自由模式）：只告诉你终端里的 dj.mjs 能调哪些能力、各产出什么——文生图、图生图/编辑、图生视频、首尾帧、参考图生视频、数字人口播、配音、音乐、音效、视频高清、视频转白模、上传素材、下载产物，以及可选的画布读写和平台 LLM 辅助（提示词优化、参考图/参考片反推提示词、剧本拆解）。不预设创作流程：提示词怎么写、先做什么后做什么、用哪个模型、要不要画布，全由用户决定。当用户说「用 RooYun 生成一张图 / 一段视频」「我自己写提示词」「别走固定流程」「直接调 RooYun 的工具」「rooyun-cli」，或提到 RooYun、ROOYUN_API_TOKEN 且想自己掌控创作时使用。生成会花用户的真钱，任何生成前先报价并等用户确认。
 ---
 
@@ -98,6 +98,7 @@ dj generate --request-id "$RID" --model … --capability … --params-json '{…
 ```sh
 dj models --capability t2i --pretty          # 有哪些模型、单价多少（pricing 为 null = 未配价，提交必被拒）
 dj voices --q 温暖少女 --pretty               # 配音前挑音色（voiceId 原样回传，别 trim；带 expiresAt 的 Gemini 设计音色 30 天到期）
+dj voices --q ja-jp --pretty                  # Gemini 地区音色（2000+，外语口音，没有中文）排在最末，按语种圈：--q 日语 / ja-jp
 dj upload ./ref.png                           # 本地素材 → assetId（≤50MB）；所有素材参数都只收 assetId
 RID=$(dj uuid)
 dj generate --request-id "$RID" --model "$MODEL" --capability t2i \
