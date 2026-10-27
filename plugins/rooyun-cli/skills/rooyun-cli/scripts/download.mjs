@@ -19,7 +19,7 @@
  * 校验：assetId 就是内容的 sha256 hex，落盘后逐个比对——不匹配即判失败并删除残件。
  */
 
-import { createWriteStream, readFileSync } from "node:fs";
+import { createReadStream, createWriteStream, readFileSync } from "node:fs";
 import { homedir } from "node:os";
 import { mkdir, rename, rm, stat, writeFile } from "node:fs/promises";
 import { createHash } from "node:crypto";
@@ -33,6 +33,10 @@ const DEFAULT_RETRY = 3;
 const PAGE_SIZE = 100;
 /** 重试基础退避（毫秒），逐次翻倍 */
 const RETRY_BASE_MS = 800;
+/** 停滞超时（毫秒）：这么久一个字节都没进来就主动断开，带 Range 续传重来 */
+const DEFAULT_STALL_MS = 30_000;
+/** 单件总尝试上限：有进展的尝试不消耗 --retry，这里兜底防止无限续传 */
+const MAX_ATTEMPTS = 30;
 
 const EXIT = { ok: 0, usage: 1, apiError: 2, partial: 3, network: 5 };
 
@@ -102,7 +106,9 @@ const HELP = `download.mjs · RooYun 开放 API v1 批量下载（零依赖，No
   --base <url>         覆盖站点地址
   --mime image|video|audio   仅 --project / --all 有效
   --concurrency <N>    并发上限，默认 ${DEFAULT_CONCURRENCY}
-  --retry <N>          单件重试次数，默认 ${DEFAULT_RETRY}（429/5xx/网络抖动才重试）
+  --retry <N>          单件无进展重试次数，默认 ${DEFAULT_RETRY}（429/5xx/网络抖动/停滞才重试；
+                       续传拿到新字节的尝试不计数）
+  --stall-seconds <N>  连续 N 秒没有新字节就断开并带 Range 续传，默认 ${DEFAULT_STALL_MS / 1000}
   --overwrite          覆盖已存在文件（默认跳过同名且大小相符的文件）
   --no-verify          跳过 sha256 校验（默认校验：assetId 即内容哈希）
   --pretty             人类可读报告（默认输出 JSON 报告，便于机器解析）
@@ -242,13 +248,66 @@ async function downloadOne(ctx, entry) {
   }
 
   let lastReason = "";
-  for (let attempt = 1; attempt <= ctx.retry; attempt += 1) {
+  let failures = 0;
+  const startedAt = Date.now();
+  for (let attempt = 1; attempt <= MAX_ATTEMPTS; attempt += 1) {
     const outcome = await attemptDownload(ctx, entry, target, fileName);
+    if (outcome.status === "downloaded") {
+      const seconds = (Date.now() - startedAt) / 1000;
+      return { ...outcome, seconds: Number(seconds.toFixed(1)), attempts: attempt };
+    }
     if (outcome.status !== "retry") return outcome;
     lastReason = outcome.reason;
-    if (attempt < ctx.retry) await sleep(RETRY_BASE_MS * 2 ** (attempt - 1));
+    // 有进展（续传拿到了新字节）的尝试不计入 --retry：限速链路上每次都能往前挪一截，
+    // 不该因为「断了几次」就放弃一件差一点就下完的文件
+    if (outcome.progressed) {
+      failures = 0;
+      continue;
+    }
+    failures += 1;
+    if (failures >= ctx.retry) break;
+    await sleep(RETRY_BASE_MS * 2 ** (failures - 1));
   }
-  return { status: "failed", reason: `重试 ${ctx.retry} 次仍失败：${lastReason}`, file: fileName };
+  return { status: "failed", reason: `重试仍失败：${lastReason}（已下部分保留在 .part，重跑会续传）`, file: fileName };
+}
+
+/** 已有 .part 的字节数；没有则 0 */
+async function partSize(temp) {
+  try {
+    return (await stat(temp)).size;
+  } catch {
+    return 0;
+  }
+}
+
+/** 把已有 .part 的内容先喂进 hash（续传时整件校验仍覆盖全部字节） */
+async function hashExisting(hash, temp) {
+  for await (const chunk of createReadStream(temp)) hash.update(chunk);
+}
+
+/**
+ * 带停滞超时的流式落盘：连续 stallMs 没有新字节就 abort。
+ * 异常时抛出，但已写入的字节留在 .part 里供续传。
+ */
+async function pipeWithStallGuard(stream, temp, append, hash, controller, stallMs) {
+  let timer = setTimeout(() => controller.abort(new Error("stalled")), stallMs);
+  const sink = createWriteStream(temp, { flags: append ? "a" : "w" });
+  try {
+    for await (const chunk of stream) {
+      clearTimeout(timer);
+      timer = setTimeout(() => controller.abort(new Error("stalled")), stallMs);
+      hash.update(chunk);
+      if (!sink.write(chunk)) {
+        await new Promise((resolve) => sink.once("drain", resolve));
+      }
+    }
+  } finally {
+    clearTimeout(timer);
+    await new Promise((resolve, reject) => {
+      sink.once("error", reject);
+      sink.end(() => resolve());
+    });
+  }
 }
 
 async function attemptDownload(ctx, entry, target, fileName) {
@@ -291,11 +350,28 @@ async function attemptDownload(ctx, entry, target, fileName) {
 
   // ② 取字节：**不带 Authorization**——签名 URL 自带凭据，把 Bearer 转发到存储域
   //    等于把令牌交给第三方。同理，location 全程不打印、不写日志。
+  //    已有 .part 则带 Range 续传（每次尝试都重新拿 302，签名过期不影响续传）。
+  const temp = `${target}.part`;
+  const resumeFrom = await partSize(temp);
+  const controller = new AbortController();
+  // 连首字节都等不来也算停滞（同一个 controller，进入流式阶段后由 pipeWithStallGuard 接管计时）
+  const headerTimer = setTimeout(() => controller.abort(new Error("stalled")), ctx.stallMs);
   let body;
   try {
-    body = await fetch(location, { redirect: "follow" });
+    body = await fetch(location, {
+      redirect: "follow",
+      signal: controller.signal,
+      ...(resumeFrom > 0 ? { headers: { range: `bytes=${resumeFrom}-` } } : {}),
+    });
   } catch (err) {
-    return { status: "retry", reason: err instanceof Error ? err.message : "取字节失败" };
+    return { status: "retry", reason: errorReason(err, "取字节失败") };
+  } finally {
+    clearTimeout(headerTimer);
+  }
+  if (body.status === 416) {
+    // .part 已不小于对象本身（残件来源不明）：丢掉从头来
+    await rm(temp, { force: true });
+    return { status: "retry", reason: "续传区间无效，已丢弃残件从头下载" };
   }
   if (!body.ok || !body.body) {
     return body.status >= 500 || body.status === 429
@@ -303,32 +379,25 @@ async function attemptDownload(ctx, entry, target, fileName) {
       : { status: "failed", reason: `存储返回 ${body.status}`, file: fileName };
   }
 
-  // ③ 先写临时文件，校验通过再改名——半截文件绝不冒充完整产物
-  const temp = `${target}.part`;
+  // ③ 先写临时文件，校验通过再改名——半截文件绝不冒充完整产物。
+  //    206 = 服务端接受续传，追加写；200 = 不认 Range，从头覆盖写。
+  const append = resumeFrom > 0 && body.status === 206;
   const hash = createHash("sha256");
-  let bytes = 0;
   try {
-    const sink = createWriteStream(temp);
-    for await (const chunk of body.body) {
-      hash.update(chunk);
-      bytes += chunk.length;
-      if (!sink.write(chunk)) {
-        await new Promise((resolve) => sink.once("drain", resolve));
-      }
-    }
-    await new Promise((resolve, reject) => {
-      sink.end(() => resolve());
-      sink.once("error", reject);
-    });
+    if (append) await hashExisting(hash, temp);
+    await pipeWithStallGuard(body.body, temp, append, hash, controller, ctx.stallMs);
   } catch (err) {
-    await rm(temp, { force: true });
-    return { status: "retry", reason: err instanceof Error ? err.message : "落盘失败" };
+    // 不删 .part：下一次尝试从断点续传。是否「有进展」决定这次失败算不算进 --retry
+    const progressed = (await partSize(temp)) > (append ? resumeFrom : 0);
+    return { status: "retry", reason: errorReason(err, "落盘失败"), progressed };
   }
 
   if (ctx.verify) {
     const digest = hash.digest("hex");
     if (digest !== entry.assetId) {
       await rm(temp, { force: true });
+      // 续传拼出来的不对，可能是上次残留的 .part 不属于本对象：清掉从头再来一次
+      if (append) return { status: "retry", reason: "续传后校验不符，已丢弃残件从头下载" };
       return {
         status: "failed",
         reason: `内容校验失败：sha256 ${digest.slice(0, 12)}… ≠ assetId ${entry.assetId.slice(0, 12)}…`,
@@ -337,6 +406,7 @@ async function attemptDownload(ctx, entry, target, fileName) {
     }
   }
 
+  const bytes = await partSize(temp);
   await rename(temp, target);
   return {
     status: "downloaded",
@@ -344,6 +414,13 @@ async function attemptDownload(ctx, entry, target, fileName) {
     bytes,
     ...(Number.isFinite(quotaRemaining) ? { quotaRemaining } : {}),
   };
+}
+
+/** 统一错误文案：停滞超时单独点名，方便从报告里看出是「卡住」而不是「断网」 */
+function errorReason(err, fallback) {
+  const cause = err?.cause ?? err;
+  if (cause instanceof Error && cause.message === "stalled") return "下载停滞超时（已保留进度，将续传）";
+  return err instanceof Error ? err.message : fallback;
 }
 
 /** 固定并发的工作池（不引第三方库，够用且行为透明） */
@@ -390,6 +467,7 @@ async function main() {
     outDir,
     concurrency: intFlag(flags, "concurrency", DEFAULT_CONCURRENCY),
     retry: intFlag(flags, "retry", DEFAULT_RETRY),
+    stallMs: intFlag(flags, "stall-seconds", DEFAULT_STALL_MS / 1000) * 1000,
     overwrite: Boolean(flags.overwrite),
     verify: !flags["no-verify"],
   };
@@ -560,6 +638,13 @@ async function readIdsFile(file) {
   return trimmed.split(/\r?\n/);
 }
 
+/** 单件平均速度（含续传重试的总耗时），定位限速/停滞用 */
+function formatSpeed(f) {
+  if (f.status !== "downloaded" || !(f.seconds > 0)) return "";
+  const kbps = f.bytes / 1024 / f.seconds;
+  return `　${f.seconds}s ${kbps.toFixed(0)}KB/s${f.attempts > 1 ? ` ${f.attempts}次` : ""}`;
+}
+
 function renderReport(report) {
   const lines = [
     `落盘目录 ${report.outDir}`,
@@ -584,7 +669,7 @@ function renderReport(report) {
   for (const f of report.files) {
     lines.push(
       `  ${f.status === "downloaded" ? "✓" : f.status === "skipped" ? "-" : "✗"} ` +
-        `${f.file ?? f.assetId}  ${f.mime}${f.reason ? `　${f.reason}` : ""}`,
+        `${f.file ?? f.assetId}  ${f.mime}${formatSpeed(f)}${f.reason ? `　${f.reason}` : ""}`,
     );
   }
   lines.push(...report.notes.map((n) => `※ ${n}`));
