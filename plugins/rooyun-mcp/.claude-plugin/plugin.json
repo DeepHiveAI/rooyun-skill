@@ -1,7 +1,7 @@
 {
   "name": "rooyun-mcp",
   "displayName": "RooYun MCP",
-  "version": "1.44.1",
+  "version": "1.45.0",
   "description": "连接 RooYun 远程 MCP 服务（https://www.rooyun.com/api/mcp），在任意会话里调用建画布、生成、取产物等工具",
   "author": {
     "name": "RooYun",

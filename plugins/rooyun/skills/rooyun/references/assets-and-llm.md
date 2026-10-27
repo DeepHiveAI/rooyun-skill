@@ -11,7 +11,9 @@ dj upload ./ref.png --pretty
 ASSET=$(dj upload ./ref.png | jq -r '.data.assetId')
 ```
 
-需要 `assets:write` scope。几条硬规矩：
+需要 `assets:write` scope。`dj upload` 默认**直传**：文件直接进对象存储、不经 API 服务器，
+已经传过的内容秒回（不传一个字节、不占上传额度）；直传不可用时自动回落普通上传，用法不变。
+几条硬规矩：
 
 - **幂等**：`assetId` = 内容 sha256，同一份字节传多少次都只有一个 id、只占一份存储。
   重传不是错误，会正常返回并把 `deduplicated` 标成 `true`。断点重试可以放心重传。

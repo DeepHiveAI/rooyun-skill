@@ -39,7 +39,7 @@
 | `chat show <id>` | `GET /api/v1/conversations/{id}` | `llm` |
 | `chat delete <id>` | `DELETE /api/v1/conversations/{id}` | `llm`（硬删，不可撤销） |
 | `chats [--agent <id>]` | `GET /api/v1/conversations` | `llm` |
-| `upload <path>` | `POST /api/v1/assets` | `assets:write` |
+| `upload <path>` | `POST /api/v1/assets/uploads` → PUT 直传 → `…/{uploadId}/complete`（不可用时回落 `POST /api/v1/assets`） | `assets:write` |
 | `edit-session create <canvasId> <nodeId>` | `POST /api/v1/edit-sessions` | `canvas:write` |
 | `edit-session status <sessionId>` | `GET /api/v1/edit-sessions/{id}` | `canvas:write` |
 | `edit-session revoke <sessionId>` | `DELETE /api/v1/edit-sessions/{id}` | `canvas:write` |

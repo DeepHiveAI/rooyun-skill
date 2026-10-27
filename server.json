@@ -3,7 +3,7 @@
   "name": "com.rooyun/rooyun",
   "title": "RooYun",
   "description": "AI comic & short-drama studio: scripts to storyboards, image/video generation on an infinite canvas",
-  "version": "1.44.1",
+  "version": "1.45.0",
   "websiteUrl": "https://www.rooyun.com/developers?utm_source=mcp-registry",
   "repository": {
     "url": "https://github.com/DeepHiveAI/rooyun-skill",

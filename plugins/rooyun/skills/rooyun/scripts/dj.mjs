@@ -27,7 +27,7 @@ import {
 } from "node:fs";
 import { spawn, spawnSync } from "node:child_process";
 import { homedir, hostname, platform, tmpdir } from "node:os";
-import { randomUUID } from "node:crypto";
+import { createHash, randomUUID } from "node:crypto";
 import { basename as pathBasename, dirname as pathDirname, join as pathJoin } from "node:path";
 import { fileURLToPath } from "node:url";
 
@@ -48,7 +48,7 @@ const DEFAULT_BASE = "https://www.rooyun.com";
  *
  * 它不是第二个真相源：生成脚本从 SKILL.md 派生写入，两处不一致时构建就红。
  */
-const EMBEDDED_SKILL_VERSION = "1.44.1";
+const EMBEDDED_SKILL_VERSION = "1.45.0";
 
 /**
  * 单次 HTTP 请求的**空闲**超时（毫秒）：两次收到字节之间允许的最大间隔，
@@ -347,7 +347,11 @@ async function readBodyWithProgress(response, onProgress) {
  * 超时是**双闸**：空闲闸（两次收到字节之间的间隔）+ 总闸。见 DEFAULT_IDLE_TIMEOUT_MS
  * 上的事故说明——单一总闸会把慢而健康的长任务判死。
  */
-async function request(ctx, method, path, body) {
+/**
+ * opts.tolerateNonJson：响应不是 JSON（网关/CDN 的 HTML 5xx）时不退出进程，
+ * 返回 `{ status, envelope: null }` 交给调用方决定回落或重试（直传会话用）。
+ */
+async function request(ctx, method, path, body, opts = {}) {
   const url = `${ctx.base}/api/v1${path}`;
   const headers = { authorization: `Bearer ${ctx.token}`, accept: "application/json" };
   // FormData 的 content-type 必须由 fetch 自己带（里面有 multipart 边界串），
@@ -404,6 +408,7 @@ async function request(ctx, method, path, body) {
     // JSON.parse 本就忽略前导空白，这里无需特殊处理
     envelope = text ? JSON.parse(text) : null;
   } catch {
+    if (opts.tolerateNonJson) return { status: response.status, headers: response.headers, envelope: null };
     process.stderr.write(
       `dj: 响应不是 JSON（HTTP ${response.status}）。检查 --base 是否指向 RooYun 站点：${ctx.base}\n`,
     );
@@ -2254,11 +2259,56 @@ async function cmdRewrite(ctx, { positional, flags }) {
   handle(ctx, await request(ctx, "POST", "/analyze/rewrite", body), pretty.rewrite);
 }
 
+/** 直传 PUT 的超时：50MB 在慢网下也够；超时即回落 multipart，不卡死 */
+const DIRECT_PUT_TIMEOUT_MS = 10 * 60_000;
+/** complete 遇 503 的重试次数（暂存文件仍在，重试无需重传） */
+const COMPLETE_RETRIES = 2;
+
+/**
+ * 直传会话（2.40.0）：建会话 → 文件直接 PUT 进对象存储 → complete 拿回执。
+ * 内容已在名下时建会话即秒回，不传一个字节。
+ * 返回 request() 同形结果（交给 handle 出结果/报错）；返回 null = 改走 multipart。
+ */
+async function tryDirectUpload(ctx, bytes) {
+  const declaration = { size: bytes.length, sha256: createHash("sha256").update(bytes).digest("hex") };
+  const tolerant = { tolerateNonJson: true };
+  const session = await request(ctx, "POST", "/assets/uploads", declaration, tolerant);
+  const data = session.envelope?.ok ? session.envelope.data : null;
+  // 旧服务端没有该端点（404/405）或服务端自身出错：静默回落 multipart；其余 4xx（超限/鉴权/限流）照常报错
+  if (!data) return session.status === 404 || session.status === 405 || session.status >= 500 ? null : session;
+  if (data.mode === "exists") return { ...session, envelope: { ...session.envelope, data: data.asset } };
+  if (data.mode !== "direct") return null;
+
+  try {
+    const put = await fetch(data.putUrl, {
+      method: "PUT",
+      body: bytes,
+      signal: AbortSignal.timeout(DIRECT_PUT_TIMEOUT_MS),
+    });
+    if (!put.ok) {
+      process.stderr.write(`dj: 直传失败（HTTP ${put.status}），改走普通上传\n`);
+      return null;
+    }
+  } catch (err) {
+    process.stderr.write(`dj: 直传失败（${err instanceof Error ? err.name : "unknown"}），改走普通上传\n`);
+    return null;
+  }
+
+  const completePath = `/assets/uploads/${data.uploadId}/complete`;
+  let done = await request(ctx, "POST", completePath, declaration, tolerant);
+  for (let attempt = 1; attempt <= COMPLETE_RETRIES && done.status >= 500; attempt += 1) {
+    await new Promise((resolve) => setTimeout(resolve, attempt * 2000));
+    done = await request(ctx, "POST", completePath, declaration, tolerant);
+  }
+  return done;
+}
+
 /**
  * 上传本地素材换 assetId。
  *
- * 用 undici 的 FormData + Blob：它会算出准确的 Content-Length，
- * 而服务端**要求必带**该头（没有长度声明就只能读完才知道多大，那时内存已经满了）。
+ * 先走直传会话（文件直接进对象存储，不经 API 服务器；已传过的内容秒回），
+ * 不可用时回落 multipart。multipart 用 undici 的 FormData + Blob：它会算出准确的
+ * Content-Length，而服务端**要求必带**该头（没有长度声明就只能读完才知道多大，那时内存已经满了）。
  * 手写 multipart 边界串或改用 chunked 传输都会直接吃 411。
  */
 async function cmdUpload(ctx, { positional, flags }) {
@@ -2272,6 +2322,12 @@ async function cmdUpload(ctx, { positional, flags }) {
     fail(`读取 ${file} 失败：${err instanceof Error ? err.message : "unknown"}`);
   }
   if (bytes.length === 0) fail(`${file} 是空文件，服务端不受理`);
+
+  const direct = await tryDirectUpload(ctx, bytes);
+  if (direct) {
+    handle(ctx, direct, pretty.uploaded);
+    return;
+  }
 
   const form = new FormData();
   // 声明的 type 只用于与服务端嗅探结果对拍；落库 mime 一律以魔数嗅探为准，

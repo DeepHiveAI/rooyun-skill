@@ -1,5 +1,5 @@
 <!--
-  rooyun-skill-version: 1.44.1
+  rooyun-skill-version: 1.45.0
 
   把下面 `## RooYun 开放 API` 整段粘进你项目的 AGENTS.md（Codex）或等价的长期指令文件，
   并把 rooyun-skill/scripts/ 放到 Agent 能执行到的位置（零依赖，Node ≥ 18）。
