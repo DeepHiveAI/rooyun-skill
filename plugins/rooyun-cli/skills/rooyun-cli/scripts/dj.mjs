@@ -48,7 +48,7 @@ const DEFAULT_BASE = "https://www.rooyun.com";
  *
  * 它不是第二个真相源：生成脚本从 SKILL.md 派生写入，两处不一致时构建就红。
  */
-const EMBEDDED_SKILL_VERSION = "1.45.0";
+const EMBEDDED_SKILL_VERSION = "1.46.0";
 
 /**
  * 单次 HTTP 请求的**空闲**超时（毫秒）：两次收到字节之间允许的最大间隔，
@@ -455,9 +455,69 @@ function skillScriptPath() {
   }
 }
 
-/** 针对特定错误码给出「下一步该做什么」的人读提示（写 stderr，不含令牌） */
-function hintFor(status, code, meta) {
-  switch (code) {
+/** 充值页（402 余额不足时给用户的去处） */
+const BILLING_URL = "https://www.rooyun.com/billing";
+
+/**
+ * 新旧码并存期（至 2027-04）：服务端先在 `error.nextCode` 里发新码，之后 `error.code` 切成新码。
+ * 两种都认，统一折回旧码再分支——切换那天本脚本不用跟着改。
+ */
+const CODE_ALIASES = {
+  model_rejected: "upstream_rejected",
+  llm_failed: "llm_upstream_failed",
+  platform_fetch_failed: "creator_upstream_failed",
+};
+
+/**
+ * 任务失败（`GET /v1/generations/:id` 的 `failure`，2.41.0 起）→ 下一步该做什么。
+ * 只按 `failure.code` / `failure.reason` 分支，不读 `error` 文案；失败的生成一律已退款。
+ */
+function failureHint(failure) {
+  switch (failure?.code) {
+    case "content_rejected":
+      if (failure.reason === "copyright") {
+        return "内容可能涉及版权：删去提示词里点名的作品、歌曲、人物后重新报价再提交。别原样重试——同样的输入必然再被拒。";
+      }
+      if (failure.reason === "real_person") {
+        return "参考图被识别为真人：换插画 / 3D / 非真人素材，或用 dj models 换支持真人参考的模型。改提示词没用，别原样重试。";
+      }
+      return "内容未通过审核：和用户一起改提示词，或逐张换参考素材后重新报价再提交；确认内容没问题可以换一个模型。别原样重试——同样的输入必然再被拒。";
+    case "invalid_input":
+      return "参考素材不符合模型要求（尺寸、格式、时长、清晰度等）：换素材后再提交。别原样重试。";
+    case "invalid_params":
+      return "参数不被该模型支持：先用 dj precheck 验参数再提交，或用 dj models 换支持该参数的模型。别原样重试。";
+    case "service_busy":
+      return "生成服务繁忙：等 1–5 分钟后换一个新的 requestId 原样重提（这一单已退款；重提的是用户确认过的同一笔，告诉用户你在重试）。连续 3 次仍繁忙就停下来问用户要不要换模型。";
+    case "model_unavailable":
+      return "该模型暂时不可用：把换模型的选项摆给用户（dj models 重挑，重新报价）；稍后也可以再试这个模型。别反复重提同一个模型。";
+    case "interrupted":
+      return "生成过程被中断，与输入无关：换一个新的 requestId 直接重提即可（这一单已退款）。";
+    case "no_output":
+      return "模型这次没产出有效结果：换一个新的 requestId 重提一次（这一单已退款）；反复出现再微调提示词。";
+    case "generation_failed":
+      return "生成失败，原因未归类：等几分钟后重试一次（这一单已退款）；仍失败就停下来，把 taskId 给用户，请他联系我们。";
+    default:
+      return typeof failure?.suggestion === "string" ? failure.suggestion : "";
+  }
+}
+
+/** 任务终态 failed 时在 stderr 说明失败类型与下一步（stdout 的 JSON 不动） */
+function reportTaskFailure(task) {
+  if (task?.status !== "failed") return;
+  const failure = task.failure;
+  const hint = failureHint(failure);
+  process.stderr.write(
+    `dj: 任务失败 ${failure?.code ?? "（无 failure 字段）"} — ${failure?.message ?? task.error ?? ""}` +
+      `${hint ? `\n    → ${hint}` : ""}\n`,
+  );
+}
+
+/**
+ * 针对特定错误码给出「下一步该做什么」的人读提示（写 stderr，不含令牌）。
+ * 没有专门分支的码按 `error.retry` 给通用处置（safe / backoff / futile）。
+ */
+function hintFor(status, code, meta, error) {
+  switch (CODE_ALIASES[code] ?? code) {
     case "insufficient_credits":
       // 纪律 12（视频）/ 纪律 14（图片）：别自己换模型或降档盲重试，把两条路摆给用户选
       return (
@@ -465,7 +525,7 @@ function hintFor(status, code, meta) {
         "A. 降规格后重新报价——视频换 MiniMax H3（dj models 里「MiniMax H3 ·」开头的对应能力行，" +
         "更便宜、赠送积分可用）；图片的默认 Qwen-Image-2.1 是按张固定价、降档一分钱也省不下来，" +
         "要降成本只能换模型（把 GPT Image 2.5 摆给用户选，别自己换）；" +
-        "B. 去网页端充值。不要自行换模型/降档、不要换 requestId 盲重试。"
+        `B. 去网页端充值（${BILLING_URL}）。不要自行换模型/降档、不要换 requestId 盲重试。`
       );
     case "token_limit_exceeded":
       return `本令牌消费限额已用尽（限额 ${meta?.limit ?? "?"}，已用 ${meta?.spent ?? "?"}）→ 账户里可能还有钱，请用户去 /profile#api 调额度或换一枚令牌。切勿引导用户充值。`;
@@ -520,6 +580,19 @@ function hintFor(status, code, meta) {
       return "该模型所在渠道承载不了局部重绘蒙版（只有 OpenAI 兼容渠道有蒙版字段，其余图片渠道都没有）。换一个图片模型重试即可——素材本身没问题，别去查蒙版。";
     case "asset_unresolved":
       return "素材引用解析失败（不属于你 / 没上云 / 签名失败）：重试和换模型都没用，先确认这些 assetId 是本令牌账号下、且已同步到云端的资产。";
+    case "upstream_rejected":
+      // 带 failureKind 时与任务失败同一套处置（见 failureHint）
+      return (
+        failureHint({ code: error?.failureKind }) ||
+        "模型拒绝了这次请求或暂不可用：按 error.retry 处理（futile 要改输入或换模型，backoff 等一会再试）。"
+      );
+    case "llm_upstream_failed":
+    case "llm_empty_output":
+      return "这一次没跑成，已自动退款：等几秒后直接重试即可。";
+    case "internal_error":
+      return "服务内部错误：等一会（1–2 分钟）再试；多次出现就停下来，把 requestId 给用户，请他联系我们。";
+    case "service_unavailable":
+      return "服务暂时不可用：稍等片刻后原样重试。";
     case "creator_upstream_failed":
       return "抖音那边没取到。message 说「已封禁主页作品列表接口」时**重试无用**，改为点名 videoIds（纪律 15）；其余情形多是地址过期或临时频控，退避 1-2 分钟重试；连续失败就别再密集打了——那是全站共享的出口，打狠了大家一起被限。";
     case "archive_limit_reached":
@@ -545,6 +618,9 @@ function hintFor(status, code, meta) {
     case "turn_incomplete":
       return "这一轮跑完了却没能落库成消息（服务端两次落库都失败）。用**同一个 requestId** 重发一次即可（幂等，不会重复扣费）；仍失败就 `dj.mjs chat history <conversationId>` 看这段会话停在哪一 seq，再决定要不要重跑。";
     default:
+      if (error?.retry === "futile") return "原样重试没用：按下面的建议改了再提交。";
+      if (error?.retry === "backoff") return "等一会（几十秒到几分钟）再试。";
+      if (error?.retry === "safe") return "可以原样重试。";
       return status >= 500 ? "服务端错误，可退避后重试。" : "";
   }
 }
@@ -591,9 +667,11 @@ function handle(ctx, result, prettyRenderer) {
   const code = envelope?.error?.code ?? `http_${realStatus}`;
   const message = envelope?.error?.message ?? "（响应无 error 字段）";
   process.stdout.write(`${JSON.stringify(envelope, null, ctx.pretty ? 2 : 0)}\n`);
-  const hint = hintFor(realStatus, code, envelope?.meta);
+  const hint = hintFor(realStatus, code, envelope?.meta, envelope?.error);
+  const suggestion = envelope?.error?.suggestion;
   process.stderr.write(
-    `dj: HTTP ${realStatus} ${code} — ${message}${hint ? `\n    → ${hint}` : ""}\n`,
+    `dj: HTTP ${realStatus} ${code} — ${message}${hint ? `\n    → ${hint}` : ""}` +
+      `${typeof suggestion === "string" && suggestion ? `\n    建议：${suggestion}` : ""}\n`,
   );
   process.exit(exitCodeFor(realStatus, code));
 }
@@ -1243,9 +1321,12 @@ const pretty = {
       `能力 ${d.capability ?? "-"}　落卡 ${d.landedTo ?? "-"}`,
       d.assetId ? `产物 ${d.assetId}` : "",
       d.error ? `失败原因 ${d.error}` : "",
-      // 纪律 12：终态失败已退款，但下一步不能是静默换模型或换 requestId 盲重试
+      d.failure?.code
+        ? `失败类型 ${d.failure.code}${d.failure.reason ? `（${d.failure.reason}）` : ""}　→ ${failureHint(d.failure)}`
+        : "",
+      // 纪律 12：终态失败已退款；按 failure.code 处置，属于「跑不动」的才摆两条路，别静默换模型
       d.status === "failed"
-        ? "※ 这一笔没扣钱。把两条路摆给用户选：A. 降规格重新报价再提交（视频换 MiniMax H3；图片换 GPT Image 2.5——默认的 Qwen-Image-2.1 按张固定价，降档省不下钱）/ B. 充值后继续用当前模型重试（新 requestId、重新报价）。别自行换模型/降档。"
+        ? "※ 这一笔没扣钱。若按上面的失败类型属于「跑不动」（model_unavailable，或多次重试仍失败），把两条路摆给用户选：A. 降规格重新报价再提交（视频换 MiniMax H3；图片换 GPT Image 2.5——默认的 Qwen-Image-2.1 按张固定价，降档省不下钱）/ B. 充值后继续用当前模型重试（新 requestId、重新报价）。别自行换模型/降档。"
         : "",
       typeof meta?.pollAfterMs === "number" ? `建议下次轮询间隔 ${meta.pollAfterMs}ms` : "",
     ]
@@ -2548,7 +2629,7 @@ async function cmdTask(ctx, { positional, flags }) {
   const path = `/generations/${encodeURIComponent(taskId)}`;
 
   if (!flags.watch) {
-    handle(ctx, await request(ctx, "GET", path), pretty.task);
+    reportTaskFailure(handle(ctx, await request(ctx, "GET", path), pretty.task));
     return;
   }
 
@@ -2576,6 +2657,7 @@ async function cmdTask(ctx, { positional, flags }) {
     const status = result.envelope.data?.status;
     if (status === "succeeded" || status === "failed" || status === "canceled") {
       emit(ctx, result.envelope, pretty.task);
+      reportTaskFailure(result.envelope.data);
       process.exit(status === "succeeded" ? EXIT.ok : EXIT.taskNotSucceeded);
     }
 

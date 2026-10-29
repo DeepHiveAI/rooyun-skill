@@ -6,12 +6,15 @@
 ## 错误处理指引
 
 **一律按 `error.code` 分支，不要按 HTTP 状态码，更不要按 `message` 文案**（文案随时会改措辞）。
-`dj.mjs` 失败时 stdout 仍是完整信封，stderr 给人读提示。
+`dj.mjs` 失败时 stdout 仍是完整信封，stderr 给人读提示（含服务端的 `suggestion`）。
 
-`dj.mjs` 退出码：`0` 成功 / 任务 succeeded ｜ `1` 用法或配置错误 ｜
-`2` API 业务错误（`canvas lint` 另用它表示「体检有 error 级 finding」，处置一致：别往下走）｜
-`3` 402（余额或限额）｜ `4` 429 ｜ `5` 网络异常 ｜ `6` `--watch` 超时（任务仍在跑，不是失败）｜
-`7` 任务终态但非 succeeded。
+错误对象还带 `retry`：`safe` = 原样重试有意义 / `backoff` = 等一会再试 / `futile` = 原样重试没用，
+必须改东西。下表没列到的码按它处置。`message` / `suggestion` 是给终端用户看的中文，可以直接转述；
+`suggestion` 里的网址（充值页、令牌页）原样给用户。
+
+**新旧码并存（至 2027-04）**：`upstream_rejected` → `model_rejected`、`llm_upstream_failed` →
+`llm_failed`、`creator_upstream_failed` → `platform_fetch_failed`。过渡期 `error.code` 仍是旧码、
+新码在 `error.nextCode`；两个都要认，处置相同。
 
 ### 慢端点会先回 HTTP 200 再报结果（心跳保活）
 
@@ -28,14 +31,14 @@ HTTP 状态码恒为 200**，真实状态码改放在信封的 `meta.httpStatus`
 
 | code | 真实含义 | 该怎么办 |
 |---|---|---|
-| `insufficient_credits` | **账户余额**空了（或只剩不覆盖该模型的赠送积分） | 把两条路摆给用户：**换 MiniMax H3**（更便宜、赠送积分可用，重新报价）或**去网页端充值**（纪律 12）。别自己换模型盲重试 |
+| `insufficient_credits` | **账户余额**空了（或只剩不覆盖该模型的赠送积分） | 把两条路摆给用户：**换 MiniMax H3**（更便宜、赠送积分可用，重新报价）或**去网页端充值**（https://www.rooyun.com/billing，纪律 12）。别自己换模型盲重试 |
 | `token_limit_exceeded` | **这枚令牌**的消费限额用尽（账户里可能钱还多得很） | 请用户去 `/profile#api` 调额度或换一枚令牌。**绝不能引导用户充值**——充了照样跑不动 |
 
 ### 其余高频码
 
 | code | HTTP | 处置 |
 |---|---|---|
-| `creator_upstream_failed` | 502 | 抖音那边没取到（多半是播放地址过期或临时频控）。退避 1–2 分钟重试；**连续失败别再密集打**——那是全站共享的出口 |
+| `creator_upstream_failed`（新码 `platform_fetch_failed`） | 502 | 抖音那边没取到（多半是播放地址过期或临时频控）。退避 1–2 分钟重试；**连续失败别再密集打**——那是全站共享的出口 |
 | `archive_limit_reached` | 409 | 未过期的转存原片满了。没有参数可改、重试也没用——等最早一份过保留期后名额自动回收 |
 | `insufficient_scope` | 403 | 令牌缺 scope，请用户重建一枚勾上对应权限的。不要重试 |
 | `radar_not_enabled` | 403 | 账号没开通「选题雷达」。**与 scope 无关——重建令牌不解决任何问题**，要管理员给账号开通。雷达 / 简报 / 文案库三个域共用这一个权益，任一域被拒都是这个码 |
@@ -55,12 +58,12 @@ HTTP 状态码恒为 200**，真实状态码改放在信封的 `meta.httpStatus`
 | `canvas_busy` | 409 | 画布正被并发修改，标记生成中失败。**未提交任何任务**，重读结构后重试 |
 | `node_busy` | 409 | 目标卡上已有在跑的生成（用户自己发起的，或你上一笔）。**未提交任何任务**。与 `canvas_busy` 不同，**重读结构没用**——等它跑完，或换一张卡。别写成同一条重试分支，会死循环 |
 | `reference_job_active` | 409 | 你（这个账号）的拆解队列满了：1 条在跑 + 3 条排队。**未提交、没有扣费**。`meta.activeJobId` 是在跑的那条、`meta.queued` 是排队数：`dj reference-analysis <activeJobId>` 等它到终态（5–15 分钟）后再发。**不是参数错误**，别放弃也别换令牌绕 |
-| `cancel_unsupported` | 409 | 该任务由上游渠道执行，没有取消通道。诚实告诉用户：等它自然结束，钱照付 |
+| `cancel_unsupported` | 409 | 该任务没有取消通道。诚实告诉用户：等它自然结束，钱照付 |
 | `asset_not_in_cloud` | 404 | 不是 id 错了，是东西没上云 → 请用户在原设备导出 |
 | `download_quota_exceeded` | 429 | 令牌当日下载配额 5 GiB 耗尽（UTC 00:00 重置）。与上面那种 429 不同：**这个等不来**，只能等次日或换令牌（管理员账号的令牌不受此配额约束，也不回 `x-download-quota-remaining`）。302 的响应头 `x-download-quota-remaining`（当日余额）与 `x-download-grant-remaining`（在途预算余额）可用来提前节流 |
-| `upstream_rejected` | 4xx/5xx | 上游拒绝或暂不可用，`message` 已脱敏 |
-| `llm_upstream_failed` | 502 | 分析端点的上游挂了。**已自动退款**，可直接重试 |
-| `llm_empty_output` | 502 | 上游正常收尾却没吐字。**已自动退款**，可直接重试 |
+| `upstream_rejected`（新码 `model_rejected`） | 4xx/5xx | 模型拒绝了这次请求或暂不可用。另带 `failureKind`，取值与处置同上面「任务失败」那张表 |
+| `llm_upstream_failed`（新码 `llm_failed`） | 502 | 分析端点这次没跑成。**已自动退款**，可直接重试 |
+| `llm_empty_output` | 502 | 模型正常收尾却没吐字。**已自动退款**，可直接重试 |
 | `llm_unparsable_output` | 502 | 有输出但结构不对。**已计费不退款**（token 真烧了），通常重试即可——但要知道这一次已经付过钱 |
 | `llm_output_truncated` | 502 | 产物撞输出上限被截断，残缺。**已计费不退款**，且**重试徒劳**（同样的输入与上限必然截在同一处）。拆短剧本分批处理，或换输出上限更高的模型 |
 | `session_consumed` | 409 | 编辑会话已被用掉（用户已提交过），撤销不了。改为 `edit-session status` 取回 `result` 里的蒙版继续流程 |
@@ -68,7 +71,8 @@ HTTP 状态码恒为 200**，真实状态码改放在信封的 `meta.httpStatus`
 | `agent_not_conversational` | 400 | 该 Agent 开不了会话（编排型，要在画布里跑）。`dj agents` 里挑 `conversational: true` 的，别换个 id 盲试 |
 | `agent_unknown` | 400 | `agentId` 不在目录里、已下线，或这段会话没绑定 Agent。先 `dj agents` 抄准 id——会话建好后 Agent **不可改**，换 Agent = 新建一段会话 |
 | `turn_incomplete` | 502 | 一轮跑完了却没能落库成消息。用**同一个 `requestId`** 重发（幂等，不重复扣费）；仍失败就 `dj chat history` 看会话停在哪一 `seq` |
-| `service_unavailable` | 503 | 依赖暂不可用（含模型未配价），可重试 |
+| `service_unavailable` | 503 | 服务暂时不可用，稍等片刻后重试 |
+| `internal_error` | 500 | 服务内部错误。等 1–2 分钟再试；多次出现就停下，把 `requestId` 给用户请他联系我们 |
 
 ### 任务终态的三个坑
 
@@ -91,6 +95,30 @@ HTTP 状态码恒为 200**，真实状态码改放在信封的 `meta.httpStatus`
 > 建卡与绑定必须**分两批**：节点 id 由服务端生成，同一批里引用不到刚建的卡。
 > `attachAsset` 只接受**空卡**（已有产物 / 版本链 / 在途任务一律 `card_not_empty`）——
 > 覆盖会让原产物脱离资产引用集、被回收误删，所以这个口子不开；正解永远是「新建一张再绑」。
+
+### 任务失败按 `failure.code` 处置
+
+`GET /v1/generations/:id` 终态 `failed` 时带 `failure` 对象。**按 `failure.code` 分支，别读 `error` 文案**。
+失败的生成一律已退款（`failure.charged: false`）。`dj task --watch` 失败时 stderr 会给出下面这张表的处置。
+
+| `failure.code` | `retry` | 处置 |
+|---|---|---|
+| `content_rejected` | futile | 内容没过审核。**别原样重试**（同样的输入必然再被拒）。看 `failure.reason`：`copyright` = 删去提示词里点名的作品、歌曲、人物；`real_person` = 参考图被识别为真人，换插画 / 3D / 非真人素材或换支持真人参考的模型，改提示词没用；`moderation` = 和用户一起改提示词或逐张换参考素材 |
+| `invalid_input` | futile | 参考素材不符合模型要求（尺寸、格式、时长、清晰度）。换素材再提交 |
+| `invalid_params` | futile | 参数不被该模型支持。先 `precheck` 验参数，或换支持它的模型（重新报价） |
+| `service_busy` | backoff | 生成服务繁忙。等 1–5 分钟后换新 `requestId` 原样重提；**连续 3 次**仍繁忙才按纪律 12 摆两条路 |
+| `model_unavailable` | futile | 该模型暂时不可用。按纪律 12 把换模型摆给用户（重新报价），别反复重提同一个模型 |
+| `interrupted` | safe | 生成过程被中断，与输入无关。换新 `requestId` 直接重提 |
+| `no_output` | safe | 模型这次没产出有效结果。重提一次；反复出现再微调提示词 |
+| `generation_failed` | backoff | 原因未归类。等几分钟重试一次；仍失败就停下，把 `taskId` 给用户请他联系我们 |
+
+重提的是用户确认过的同一笔（失败那笔已退款），不必重新问价，但要告诉用户你在重试。
+改了模型、档位或参数就是新报价（纪律 1）。
+
+`dj.mjs` 退出码：`0` 成功 / 任务 succeeded ｜ `1` 用法或配置错误 ｜
+`2` API 业务错误（`canvas lint` 另用它表示「体检有 error 级 finding」，处置一致：别往下走）｜
+`3` 402（余额或限额）｜ `4` 429 ｜ `5` 网络异常 ｜ `6` `--watch` 超时（任务仍在跑，不是失败）｜
+`7` 任务终态但非 succeeded。
 
 ### 取消的诚实语义
 

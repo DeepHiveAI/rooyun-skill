@@ -1,7 +1,7 @@
 ---
 name: rooyun
-version: 1.45.0
-releasedAt: 2026-10-27
+version: 1.46.0
+releasedAt: 2026-10-29
 description: 用自然语言驱动 RooYun（短剧 AI 创作工作台）的开放 API：建项目与无限画布、按「剧本 → 角色/场景/道具 → 分镜视频卡 → 生成」的固定顺序搭画布、用平台 LLM 把剧本拆成结构化的角色/场景/道具/分镜再落成卡片、调模型生成图片视频音频并自动落回卡片、把一段现成视频转成白模再让新角色复刻它的动作与运镜、反推参考素材的提示词、质检分镜图、下载产物到本地、把抖音视频分享链接解析成可直接下载的视频直链，供本地看片做对标分析；以及选题情报一条链：读每日频道简报（选题 + 「AI 数字人做不做得了」的可执行性判断 + 对标参考）、订阅对标博主并按增速看谁在起来、查热榜与每日选题报告、检索文案库看别人的爆款是怎么写的（钩子/段落节奏/CTA）。当用户说「用 RooYun 生成分镜 / 把我的剧本做成视频工程 / 拆一下这个剧本的角色 / 在 RooYun 里建个项目 / 把这段视频换成我的角色重演 / 下载我 RooYun 项目的产物 / 查我 RooYun 还剩多少积分 / 帮我把这条抖音视频下下来看看 / 抓一下这个抖音博主的视频 / 今天做什么选题 / 帮我盯着这几个对标博主 / 别人这条爆款是怎么写的 / 看看今天的选题简报」，或提到 RooYun、rooyun.com、ROOYUN_API_TOKEN 时使用本技能。生成类会花用户的真钱，任何生成前必须先报价并等用户确认；选题情报那条链全部只读、不扣积分。
 ---
 
@@ -473,10 +473,16 @@ dj edit-session status "$SID" --pretty
 - 三种「跑不动」都要停下来把两条路摆给用户，**不要自行换模型、不要换个 requestId 盲重试**：
   ① `precheck` 的 `ok=false` 且各项 `priced=true`（`available` 小于 `total`；最常见成因是
   用户手里只有赠送积分，而赠送积分不覆盖 Seedance）；② `precheck` / `generate` 回 402
-  `insufficient_credits`；③ 任务终态 `failed`，或提交被 `upstream_rejected` /
-  `service_unavailable` 拒绝。
+  `insufficient_credits`；③ 任务终态 `failed` 且 `failure.code` 为 `model_unavailable`
+  （`service_busy` 连续 3 次、`generation_failed` 重试 1 次后仍失败也算），或提交被
+  `upstream_rejected` / `service_unavailable` 拒绝。
+- 任务失败先看 `failure.code`，别一律当「跑不动」：`content_rejected` / `invalid_input` /
+  `invalid_params` 要改提示词、素材或参数，原样重试必然再失败；`service_busy` 等 1–5 分钟后
+  换新 `requestId` 重提；`interrupted` / `no_output` 换新 `requestId` 直接重提一次。这几类
+  重提的是用户确认过的同一笔（失败的那笔已退款），告诉用户你在重试即可。详见
+  [references/errors.md](references/errors.md)「任务失败按 failure.code 处置」。
 - 话术固定给两个选项：「这批用 Seedance 2.0 Fast 720p 需要 X 积分，当前可用 Y，跑不动
-  （或：上游调用失败，这一笔没扣钱）。**A.** 换 MiniMax H3——目录里名字以「MiniMax H3 ·」
+  （或：这次生成没成功，这一笔没扣钱）。**A.** 换 MiniMax H3——目录里名字以「MiniMax H3 ·」
   开头、能力含本粒度的那一行（`ref2v`/`i2v` 是「全参考」，`flf2v` 是「首尾帧」），平台自建算力、
   单价更低、赠送积分可用，我会重新报价再提交；**B.** 去网页端充值，我继续用 Seedance。」
   然后等用户选，别替他选。
@@ -554,7 +560,8 @@ dj edit-session status "$SID" --pretty
   提示词里用 `<image1>`…`<image10>` 指派每一张的用途，编号即上送数组下标。局部重绘的蒙版
   规则不变（`mask` 只有 `t2i` 消费，见下文；模型不吃蒙版会回 422 `mask_unsupported`）。
 - **跑不动时同纪律 12 的两条路，别自己换模型**：`precheck` 回 `ok=false`、402
-  `insufficient_credits` 或任务终态 `failed` 时，把两条路摆给用户等他选：
+  `insufficient_credits`，或任务终态 `failed` 且按纪律 12 的 `failure.code` 口径属于
+  「跑不动」时，把两条路摆给用户等他选：
   **A.** 换 GPT Image 2.5（按 token 计费、赠送只覆盖 1K，我会重新报价再提交）；
   **B.** 去网页端充值。**等用户点头再换**——换模型是创作决策，不要替他选。
 
