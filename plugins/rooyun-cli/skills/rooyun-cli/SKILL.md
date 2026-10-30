@@ -1,7 +1,7 @@
 ---
 name: rooyun-cli
-version: 1.46.0
-releasedAt: 2026-10-29
+version: 1.48.0
+releasedAt: 2026-10-30
 description: RooYun 精简版（CLI 自由模式）：只告诉你终端里的 dj.mjs 能调哪些能力、各产出什么——文生图、图生图/编辑、图生视频、首尾帧、参考图生视频、数字人口播、配音、音乐、音效、视频高清、视频转白模、上传素材、下载产物，以及可选的画布读写和平台 LLM 辅助（提示词优化、参考图/参考片反推提示词、剧本拆解）。不预设创作流程：提示词怎么写、先做什么后做什么、用哪个模型、要不要画布，全由用户决定。当用户说「用 RooYun 生成一张图 / 一段视频」「我自己写提示词」「别走固定流程」「直接调 RooYun 的工具」「rooyun-cli」，或提到 RooYun、ROOYUN_API_TOKEN 且想自己掌控创作时使用。生成会花用户的真钱，任何生成前先报价并等用户确认。
 ---
 
@@ -88,7 +88,7 @@ dj generate --request-id "$RID" --model … --capability … --params-json '{…
 | 首尾帧视频 | `flf2v` | `firstFrame` + `lastFrame` | 同上 |
 | 参考图生视频 | `ref2v` | 顶层 `--reference`（1–9 张） | 同上；`--reference-audio` 锁音色、`--reference-video` 动作/运镜参考 |
 | 数字人口播 | `avatar` | `drivingAudio`(wav/mp3) + `firstFrame` 或 `motionVideo` | `prompt`、`aspectRatio` |
-| 配音 | `t2a` | `text` + `voiceId`(系统音色) 或 `voiceName`(用户音色)（必填，`dj voices` 挑；不传 = 400）。`provider:"gemini"` 的音色（`kore` 这类预置、`voice_` 开头的设计音色）一律填 `voiceId`，只配 Gemini 模型 | `speed`、`emotion`；Gemini / VoxCPM2 用 `styleText`（一句风格指令，≤100 字、不含括号，Gemini 不认 `emotion`） |
+| 配音 | `t2a` | `text` + `voiceId`(系统音色) 或 `voiceName`(用户音色)（必填，`dj voices` 挑；不传 = 400）。`provider:"gemini"` 的音色（`kore` 这类预置、`voice_` 开头的设计音色）一律填 `voiceId`，只配 GM 模型 | `speed`、`emotion`；GM / VoxCPM2 用 `styleText`（一句风格指令，≤100 字、不含括号，GM 不认 `emotion`） |
 | 音乐 | `music` | `text` | `lyrics`、`instrumental`、`durationSec` |
 | 音效 | `sfx` | `text` | `durationSec`(0.5–30) |
 | 视频高清 | `upscale` | `video` | `targetResolution`(1080p/2k) |
@@ -97,12 +97,12 @@ dj generate --request-id "$RID" --model … --capability … --params-json '{…
 
 ```sh
 dj models --capability t2i --pretty          # 有哪些模型、单价多少（pricing 为 null = 未配价，提交必被拒）
-dj voices --q 温暖少女 --pretty               # 配音前挑音色（voiceId 原样回传，别 trim；带 expiresAt 的 Gemini 设计音色 30 天到期）
-dj voices --q ja-jp --pretty                  # Gemini 地区音色（2000+，外语口音，没有中文）排在最末，按语种圈：--q 日语 / ja-jp
+dj voices --q 温暖少女 --pretty               # 配音前挑音色（voiceId 原样回传，别 trim；带 expiresAt 的 GM 设计音色 30 天到期）
+dj voices --q ja-jp --pretty                  # GM 地区音色（2000+，外语口音，没有中文）排在最末，按语种圈：--q 日语 / ja-jp
 dj upload ./ref.png                           # 本地素材 → assetId（≤50MB）；所有素材参数都只收 assetId
 RID=$(dj uuid)
 dj generate --request-id "$RID" --model "$MODEL" --capability t2i \
-  --params-json '{"prompt":"<用户的提示词，原样>","size":"2k"}' --pretty
+  --params-json '{"prompt":"<用户的提示词，原样>","size":"1k"}' --pretty
 dj task <taskId> --watch --pretty             # 终态拿 assetId 与 chargedCredits（实扣）
 node "$SKILL/scripts/download.mjs" --asset <assetId> --out ./out --pretty
 ```
@@ -154,14 +154,17 @@ node "$SKILL/scripts/download.mjs" --asset <assetId> --out ./out --pretty
 
 ## 默认模型（用户没点名时的建议，用户点名就听用户的）
 
-- **图片**：名字以「Qwen-Image-2.1」开头的那一行（`t2i` / `i2i` 各一行，按 capability 现取 id，别硬编）。
-  固定 0.05 积分/张，1k/2k、`quality` 高低都同价；只有 1k/2k 两档（`4k` 会回落 2k）。
-- **视频**（`i2v` / `flf2v` / `ref2v`）：名字以「Seedance 2.0 Fast」开头的那一行，**`precheck` 与 `generate`
-  都显式带 `resolution:"720p"`**——它的默认档是 480p，不带就按 480p 出片计价。
+- **图片**：名字以「TT Image 2.5 Flare」开头的那一行（`t2i` / `i2i` 各一行，按 capability 现取 id，别硬编）。
+  不带 `size` 就是 1k（0.09 积分/张），2K/4K 是 1K 的 2.03/3.36 倍，用户要才传；别传 `quality`；
+  赠送积分不覆盖。更便宜的选择是名字以「Qwen-Image-2.1 · GPU」开头的那一行
+  （平台自建算力、固定 0.05 积分/张、赠送积分可用）。
+- **视频**（`i2v` / `flf2v` / `ref2v`）：名字以「Seedance 2.0 Fast」开头的那一行，**默认 480p**——
+  不带 `resolution` 就按 480p 出片计价；用户要 720p 时 `precheck` 与 `generate` 都显式带
+  `resolution:"720p"`（约 2.15 倍单价）。
   更便宜的选择是名字以「MiniMax H3 ·」开头的那一行（平台自建算力、赠送积分可用）。
 
 ```sh
-MODEL=$(dj models --capability t2i | jq -r '.data.models[] | select(.name | startswith("Qwen-Image-2.1")) | .id' | head -1)
+MODEL=$(dj models --capability t2i | jq -r '.data.models[] | select(.name | startswith("TT Image 2.5 Flare") or startswith("GPT Image 2.5 Flare")) | .id' | head -1)
 VIDEO=$(dj models --capability ref2v | jq -r '.data.models[] | select(.name | startswith("Seedance 2.0 Fast")) | .id' | head -1)
 ```
 

@@ -205,7 +205,7 @@ dj canvas structure "$CANVAS" | jq -r '.data.nodes[] | select(.title=="镜1 推�
 | `flf2v` 首尾帧生视频 | `firstFrame` + `lastFrame` | 同 `i2v` |
 | `ref2v` 参考图生视频 | 顶层 `referenceAssetIds`（≥1，最多 9） | 同 `i2v`、顶层 **`referenceAudioAssetIds`**（锁角色音色，见「角色音色一致性」章；加顶层 `referenceAudioMode: "fully_copy"` 则改为**原样复用这段音频当成片声音**，如唱用户的歌：仅 H3 全参考、恰好一段、≤15 秒，时长跟随音频）、顶层 **`referenceVideoAssetIds`**（≤3 段，动作/运镜参考，见「白模换角」章） |
 | `avatar` 数字人口播 | `drivingAudio` + （`firstFrame` 或 `motionVideo` 至少一个；或管理员的专属数字人 `digitalHumanId`，见下节） | `prompt`、`aspectRatio`（见下节） |
-| `t2a` 配音 | `text` + 音色（`voiceId` 或 `voiceName` 二选一，先 `dj voices` 挑；不传 = 400 不扣费，平台不替你挑默认嗓子） | `speed`、`emotion`、`styleText`、`moodId`、**`emoVector`+`emoAlpha`**（8 维情感向量+强度，成对）、**`durationFactor`**（模型内变速，与 `speed` 互斥）——后三个要先按 `audio` 能力位挑模型，见「配音情绪向量」节。**Gemini 模型**用 `styleText`（一句自然语言风格指令，≤100 字、不含括号）表达情绪与语速，`emotion` 对它不生效；台词里的停顿 `<#0.5#>` 与语气词由服务端转成 Gemini 标签 |
+| `t2a` 配音 | `text` + 音色（`voiceId` 或 `voiceName` 二选一，先 `dj voices` 挑；不传 = 400 不扣费，平台不替你挑默认嗓子） | `speed`、`emotion`、`styleText`、`moodId`、**`emoVector`+`emoAlpha`**（8 维情感向量+强度，成对）、**`durationFactor`**（模型内变速，与 `speed` 互斥）——后三个要先按 `audio` 能力位挑模型，见「配音情绪向量」节。**GM 模型**用 `styleText`（一句自然语言风格指令，≤100 字、不含括号）表达情绪与语速，`emotion` 对它不生效；台词里的停顿 `<#0.5#>` 与语气词由服务端转成 GM 标签 |
 | `music` 音乐 | `text` | `lyrics`、`instrumental`、`durationSec` |
 | `sfx` 音效 | `text` | `durationSec`（0.5–30） |
 | `upscale` **视频**高清 | `video` | `targetResolution`(1080p/2k) |
@@ -346,10 +346,10 @@ VOICE=$(dj voices --q 温暖少女 | jq -r '.data.voices[0].voiceId')
   `provider: "selfhosted"` 的就是自建 TTS（IndexTTS / VoxCPM2）的「我的音色」，`voiceId`
   形如 `v_我的声音_xxxxxx`，按入库时间倒序排在系统音色前面。
 - **`provider: "gemini"` 例外，一律填 `params.voiceId`**：系统音色是小写 id（如 `kore`），
-  用户设计音色以 `voice_` 开头。Gemini 音色只能配 Gemini 模型（`dj models --capability t2a`
-  里挑 Gemini 的那条），配给别的模型会被拒。带 `expiresAt` 的设计音色**会到期（30 天）**，
+  用户设计音色以 `voice_` 开头。GM 音色只能配 GM 模型（`dj models --capability t2a`
+  里挑 GM 的那条），配给别的模型会被拒。带 `expiresAt` 的设计音色**会到期（30 天）**，
   过期后合成失败——长剧集定嗓前先看一眼这个字段。
-- Gemini 系统音色分两类：**30 个经典音色**（`language: "多语种"`，**中文配音只用它们**）和
+- GM 系统音色分两类：**30 个经典音色**（`language: "多语种"`，**中文配音只用它们**）和
   **2000 多个地区音色**（id 形如 `ja-jp-techagent-10`，按语种区分口音，**没有中文**）。
   地区音色排在目录最末，不带 `--q` 翻首页看不到；要外语口音就按语种圈：
   `dj voices --q 日语`、`dj voices --q ja-jp`、`dj voices --q 美式英语`。
@@ -364,9 +364,9 @@ VOICE=$(dj voices --q 温暖少女 | jq -r '.data.voices[0].voiceId')
 
 ### 配音情绪向量（IndexTTS 2.5）
 
-情绪有几套**互不通用**的控制方式，按模型选一套：MiniMax 用 `emotion`；VoxCPM2 与 Gemini
+情绪有几套**互不通用**的控制方式，按模型选一套：MiniMax 用 `emotion`；VoxCPM2 与 GM
 这类吃自然语言的模型用 `styleText`（一句风格指令，≤100 字、不含括号，如「压低声音、语速偏慢，带点疲惫」；
-Gemini 的语速也写进这句里，`emotion` 对它不生效）；IndexTTS 2.5 这类向量引擎用 `emoVector` + `emoAlpha`。
+GM 的语速也写进这句里，`emotion` 对它不生效）；IndexTTS 2.5 这类向量引擎用 `emoVector` + `emoAlpha`。
 
 **① 挑模型**：`dj models --capability t2a --pretty` 里带「配音 情感向量 emoVector ✓」一行的才吃向量；
 脚本里用 jq 筛（整块 `audio` 缺席 = 两个新参数都不吃）：

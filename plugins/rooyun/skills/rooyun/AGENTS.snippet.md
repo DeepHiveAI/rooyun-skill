@@ -1,5 +1,5 @@
 <!--
-  rooyun-skill-version: 1.46.0
+  rooyun-skill-version: 1.48.0
 
   把下面 `## RooYun 开放 API` 整段粘进你项目的 AGENTS.md（Codex）或等价的长期指令文件，
   并把 rooyun-skill/scripts/ 放到 Agent 能执行到的位置（零依赖，Node ≥ 18）。
@@ -40,7 +40,7 @@ node scripts/dj.mjs login   # ② 再跑一次：等待授权（最多 90s），
    没有例外——用户说「你看着办」只覆盖创作决策，不覆盖花钱额度。
    `precheck` 对未配价模型也返回 200，必须逐项看 `items[].priced` 与整批 `ok`。
    需求变大（加镜头 / 换贵模型 / 加时长）→ 重新报价、重新确认。
-   `precheck -f` 形状：`{"items":[{"model":"…","capability":"t2i","params":{"size":"2k"}}]}`
+   `precheck -f` 形状：`{"items":[{"model":"…","capability":"t2i","params":{"size":"1k"}}]}`
    （params 只认 `durationSec`/`resolution`/`size`/`targetResolution` 四个影响价格的键）。
    响应自带 `balance`，**报价不需要 `billing:read`**。
    **链式生成要报两次价**：`t2i → i2v` 的第二段 `firstFrame` 要等第一段产物，没法合并预检——
@@ -132,10 +132,11 @@ node scripts/dj.mjs login   # ② 再跑一次：等待授权（最多 90s），
     都已连上参考图；③ 有对白的镜头对白确实在提示词里。**不要留「她」「那个男人」这类代称**
     ——跨镜生成里它指代不到任何人。发现问题先 `updateCard` 改回卡上再生成，
     只在本次请求里临时改的话，用户看到的和下次重新生成用的还是错的那版。
-12. **视频默认走 Seedance 2.0 Fast 720p；余额不够或调用失败时，把「换 MiniMax H3」和「充值」
+12. **视频默认走 Seedance 2.0 Fast 480p；余额不够或调用失败时，把「换 MiniMax H3」和「充值」
     两条路摆给用户选。** `i2v`/`flf2v`/`ref2v` 用户没点名模型时，一律用 `dj models` 里名字以
-    「Seedance 2.0 Fast」开头的那一行（现取 id，别硬编 uuid），且 `precheck` 与 `generate` 的
-    params **都显式带 `resolution:"720p"`**（它默认档 480p，不给就按 480p 出片计价）。
+    「Seedance 2.0 Fast」开头的那一行（现取 id，别硬编 uuid），**档位默认 480p**：不带
+    `resolution` 即按 480p 出片计价。用户要 720p 时 `precheck` 与 `generate` 的 params
+    **都显式带 `resolution:"720p"`**（约 480p 的 2.15 倍单价），别擅自升档。
     用户点名了就按用户的。三种跑不动——`precheck` `ok=false` 且各项 `priced=true`（可用 < 合计，
     常见于只有赠送积分）、402 `insufficient_credits`、任务终态 `failed` / `upstream_rejected`——
     **不要自行换模型、不要换 requestId 盲重试**，固定话术：「A. 换 MiniMax H3（名字以
@@ -157,16 +158,14 @@ node scripts/dj.mjs login   # ② 再跑一次：等待授权（最多 90s），
     `dj chat delete` 是**硬删**（连消息、不可撤销、网页端也没了、不退款不动账本）：
     删前必须跟用户确认，别为了「重新开始」删掉还在用的会话。
 
-14. **图片默认走 Qwen-Image-2.1 · GPU；固定 0.05 积分/张，画质与档位都不改价**——`t2i`/`i2i`
-    都用目录里名字以「Qwen-Image-2.1」开头的那一行（现取 id，别硬编 uuid；同名两行，
-    按 capability 各取各的）。1K 与 2K 同价、三个画质档同价，**别为了省钱劝用户降档**。
-    档位只有 `1k`/`2k`（**没有 4K**，传了回退默认档 `2k`；不带 `size` 就是 `2k`）。
-    `quality` **可以传且是真参数**（GPU 通道映射采样步数：low = 文生图 15 / 编辑 18，
-    不传 = 25，high = 35，不加价）
-    ——与旧版「别传 quality」相反。赠送积分**全覆盖**，没有「只覆盖 1K」那道坎。
-    参考图最多 **9 张**（顶层 `referenceAssetIds`，模型支持 10 但卡在 API 上限），
-    提示词用 `<image1>`…`<image10>` 按上送下标指派用途。跑不动时把
-    「A. 换 GPT Image 2.5 重新报价 / B. 充值」摆给用户选，**等他点头再换**。
+14. **图片默认走 TT Image 2.5 Flare 1K；2K/4K 按档加价，赠送积分不可用**——`t2i`/`i2i`
+    都用目录里名字以「TT Image 2.5 Flare」开头的那一行（现取 id，别硬编 uuid；同名两行，
+    按 capability 各取各的）。**不带 `size` 就是 `1k`**（0.09 积分/张），2K/4K 是 1K 的
+    2.03/3.36 倍，用户要才显式传 `size`，**别擅自升档**。**别传 `quality`**（只上架 `low`
+    一档，传了也被收窄回 `low`）。**赠送积分不覆盖本模型**，只有赠送积分时报价 `ok=false`
+    或 402。参考图最多 **6 张**（顶层 `referenceAssetIds`，超出丢弃）。跑不动时把
+    「A. 换 Qwen-Image-2.1（名字以「Qwen-Image-2.1 · GPU」开头的对应能力行，自建算力、
+    固定 0.05 积分/张、赠送积分可用，我重新报价）/ B. 充值」摆给用户选，**等他点头再换**。
 
 15. **博主分析一律点名 `videoIds`，别让服务端自动挑样本**——抖音自 2026-09-15 封了博主
     主页作品列表接口（游客态恒 403），自动挑样本拿不到候选池、必然 502；单条视频解析完全正常。
@@ -198,7 +197,7 @@ dj models --capability i2v --pretty                   # 5 挑模型（配音先 
 dj precheck -f quote.json --pretty                    # 6 报价 → 报给用户等确认 ★
 RID=$(dj uuid)                                        # 7 幂等键，存下来
 dj generate --request-id "$RID" --model <id> --capability t2i \
-   --params-json '{"prompt":"…","size":"2k"}' --canvas <c> --node <n>
+   --params-json '{"prompt":"…","size":"1k"}' --canvas <c> --node <n>
 dj task <taskId> --watch --pretty                     # 8 轮询到终态（产物自动落卡）
 dj inspect <产物assetId> --prompt "…" --pretty         # 8.5 质检（不扣积分）
 node scripts/download.mjs --project <projectId> --out ./out --pretty   # 9 下载 + 完整性

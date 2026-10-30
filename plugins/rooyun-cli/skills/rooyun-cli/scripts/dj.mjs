@@ -48,7 +48,7 @@ const DEFAULT_BASE = "https://www.rooyun.com";
  *
  * 它不是第二个真相源：生成脚本从 SKILL.md 派生写入，两处不一致时构建就红。
  */
-const EMBEDDED_SKILL_VERSION = "1.46.0";
+const EMBEDDED_SKILL_VERSION = "1.48.0";
 
 /**
  * 单次 HTTP 请求的**空闲**超时（毫秒）：两次收到字节之间允许的最大间隔，
@@ -523,8 +523,8 @@ function hintFor(status, code, meta, error) {
       return (
         `账户余额不足（需 ${meta?.need ?? "?"}，余 ${meta?.balance ?? "?"}）→ 把两条路摆给用户选：` +
         "A. 降规格后重新报价——视频换 MiniMax H3（dj models 里「MiniMax H3 ·」开头的对应能力行，" +
-        "更便宜、赠送积分可用）；图片的默认 Qwen-Image-2.1 是按张固定价、降档一分钱也省不下来，" +
-        "要降成本只能换模型（把 GPT Image 2.5 摆给用户选，别自己换）；" +
+        "更便宜、赠送积分可用）；图片的默认 TT Image 2.5 Flare 赠送积分不覆盖，" +
+        "降成本换 Qwen-Image-2.1（「Qwen-Image-2.1 · GPU」开头的对应能力行，固定 0.05 积分/张、赠送积分可用；摆给用户选，别自己换）；" +
         `B. 去网页端充值（${BILLING_URL}）。不要自行换模型/降档、不要换 requestId 盲重试。`
       );
     case "token_limit_exceeded":
@@ -1265,7 +1265,7 @@ const pretty = {
       "※ 这是体验层报价，不是扣费承诺。请把合计报给用户并等确认后再提交。",
       // 纪律 12：各项都配了价却整批跑不动 = 余额不够（常见于只有不覆盖该模型的赠送积分）
       !d.ok && d.items.every((it) => it.priced)
-        ? "※ 可用积分不够这一批：别自己换模型/降档——把两条路摆给用户选：A. 降规格重新报价（视频换 MiniMax H3；图片的默认 Qwen-Image-2.1 按张固定价、降档省不下钱，要省只能换 GPT Image 2.5）/ B. 去网页端充值。"
+        ? "※ 可用积分不够这一批：别自己换模型/降档——把两条路摆给用户选：A. 降规格重新报价（视频换 MiniMax H3；图片的默认 TT Image 2.5 Flare 赠送积分不覆盖，换 Qwen-Image-2.1——固定 0.05 积分/张、赠送积分可用）/ B. 去网页端充值。"
         : "",
     ]
       .filter(Boolean)
@@ -1326,7 +1326,7 @@ const pretty = {
         : "",
       // 纪律 12：终态失败已退款；按 failure.code 处置，属于「跑不动」的才摆两条路，别静默换模型
       d.status === "failed"
-        ? "※ 这一笔没扣钱。若按上面的失败类型属于「跑不动」（model_unavailable，或多次重试仍失败），把两条路摆给用户选：A. 降规格重新报价再提交（视频换 MiniMax H3；图片换 GPT Image 2.5——默认的 Qwen-Image-2.1 按张固定价，降档省不下钱）/ B. 充值后继续用当前模型重试（新 requestId、重新报价）。别自行换模型/降档。"
+        ? "※ 这一笔没扣钱。若按上面的失败类型属于「跑不动」（model_unavailable，或多次重试仍失败），把两条路摆给用户选：A. 降规格重新报价再提交（视频换 MiniMax H3；图片从默认的 TT Image 2.5 Flare 换 Qwen-Image-2.1——自建算力、固定 0.05 积分/张、赠送积分可用）/ B. 充值后继续用当前模型重试（新 requestId、重新报价）。别自行换模型/降档。"
         : "",
       typeof meta?.pollAfterMs === "number" ? `建议下次轮询间隔 ${meta.pollAfterMs}ms` : "",
     ]
