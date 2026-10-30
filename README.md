@@ -1,6 +1,6 @@
 # RooYun Skill & MCP
 
-让 Claude Code、Codex、Cursor 等 AI 编程助手，用一句话驱动 [RooYun](https://www.rooyun.com/?utm_source=github&utm_medium=readme)：AI 漫剧与 AI 短剧的创作工作台。
+让 Claude Code、Codex、Cursor 等 AI 编程助手，用一句话驱动 [RooYun](https://www.rooyun.com/?utm_source=github&utm_medium=readme)（如云）：AI 漫剧与 AI 短剧的创作工作台。
 
 > 「把这个剧本做成分镜工程」→ Agent 在 RooYun 里建好项目，拆出角色、场景、道具和分镜卡片，报价后生成分镜图和视频，产物自动落回画布。
 
