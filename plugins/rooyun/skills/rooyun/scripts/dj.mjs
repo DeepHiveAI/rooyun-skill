@@ -17,12 +17,15 @@
 
 import {
   chmodSync,
+  closeSync,
   existsSync,
   mkdirSync,
+  openSync,
   readFileSync,
   readdirSync,
   renameSync,
   rmSync,
+  statSync,
   writeFileSync,
 } from "node:fs";
 import { spawn, spawnSync } from "node:child_process";
@@ -48,7 +51,7 @@ const DEFAULT_BASE = "https://www.rooyun.com";
  *
  * 它不是第二个真相源：生成脚本从 SKILL.md 派生写入，两处不一致时构建就红。
  */
-const EMBEDDED_SKILL_VERSION = "1.51.1";
+const EMBEDDED_SKILL_VERSION = "1.52.0";
 
 /**
  * 单次 HTTP 请求的**空闲**超时（毫秒）：两次收到字节之间允许的最大间隔，
@@ -420,7 +423,7 @@ async function request(ctx, method, path, body, opts = {}) {
     process.exit(EXIT.network);
   }
   // 顺带看一眼服务端带回的最新版本号（每条 v1 响应都带），落后就提醒一次
-  noticeSkillUpdate(response.headers.get("x-skill-latest"), ctx.base);
+  await handleSkillUpdate(response.headers.get("x-skill-latest"), ctx.base);
   return { status: response.status, headers: response.headers, envelope };
 }
 
@@ -431,31 +434,221 @@ function localSkillVersion() {
   return localSkillVersionCache;
 }
 
-/** 本进程是否已提醒过更新（一次运行只说一次，别把 stderr 刷满） */
-let updateNoticed = false;
+/** 本进程是否已处理过更新（一次运行只处理一次，别把 stderr 刷满） */
+let updateHandled = false;
+
+/** 自动更新的开关：`ROOYUN_SKILL_AUTO_UPDATE=0 / off / false / no` 关闭，其余（含不设）开启 */
+function autoUpdateEnabled() {
+  return !/^(0|off|false|no)$/i.test((process.env.ROOYUN_SKILL_AUTO_UPDATE ?? "").trim());
+}
+
+/** 同一目标版本失败后多久再试（避免每条命令都去下载一次） */
+const AUTO_UPDATE_RETRY_MS = 24 * 60 * 60 * 1000;
+/** 另一个 dj 进程正在更新的锁，超过这么久视为残留（进程被杀）可以接手 */
+const AUTO_UPDATE_LOCK_STALE_MS = 2 * 60 * 1000;
+/** 自动更新的下载上限：比手动 update 短，别让一条普通命令被拖太久 */
+const AUTO_UPDATE_TIMEOUT_MS = 20_000;
+
+function autoUpdateStatePath() {
+  return pathJoin(homedir(), ".rooyun", "skill-auto-update.json");
+}
+
+/** a 比 b 新（x.y.z 按数值比）；形态不对一律当不新，宁可不更新 */
+function isNewerVersion(a, b) {
+  const pa = String(a).split(".").map(Number);
+  const pb = String(b).split(".").map(Number);
+  if (pa.length !== 3 || pb.length !== 3 || [...pa, ...pb].some((n) => !Number.isInteger(n))) return false;
+  for (let i = 0; i < 3; i += 1) {
+    if (pa[i] !== pb[i]) return pa[i] > pb[i];
+  }
+  return false;
+}
 
 /**
- * 比对线上版本与本地装的版本，落后就在 stderr 说一句。
+ * 看到线上有新版时：能自动更新就自动更新，否则提醒一次。
  *
- * 为什么由客户端比对：服务端不知道调用方装的是哪一版（裸 skill 目录没有任何
- * 上报机制），而本地版本就在同级的 SKILL.md frontmatter 里——它只需要被读一次。
+ * 为什么要自动：只提醒不管用。提醒在 stderr，命令成功时编程 Agent 基本不看，
+ * 失败时也常常只盯着报错——2026-11-01 有用户一直用着旧版、反复撞同一个早已修好的坑。
+ * 裸 skill 目录没有任何官方更新协议，不自动更新，用户就会一直用旧版。
  *
- * 为什么必须提醒：裸 skill 装完就是一个静态目录，Claude Code 只对 plugin 提供
- * 更新协议，对 skill 没有。不主动说，用户会一直用着旧版——我们新增的字段与
- * 工作流纪律对他全部不生效，而**双方都不会察觉**。
- *
- * 走 stderr 而不是 stdout：stdout 是给 jq / JSON.parse 的机器契约，混进人读文字会毁掉它。
+ * 只在「能确定覆盖哪个目录、覆盖了不会伤到人」时自动更新（见 autoUpdateBlocker）；
+ * 插件安装、只拷了 scripts/ 的安装、源码仓库里的副本一律只提醒。
+ * 更新失败绝不影响当前命令：本进程早已把脚本读进内存，新版从下次调用起生效。
  */
-function noticeSkillUpdate(latest, base) {
-  if (updateNoticed || !latest) return;
+async function handleSkillUpdate(latest, base) {
+  if (updateHandled || !latest) return;
   const local = readLocalSkillMeta();
-  if (!local || local.version === latest) return;
-  updateNoticed = true;
+  if (!local || !isNewerVersion(latest, local.version)) return;
+  updateHandled = true;
+
+  const skillDir = skillDirOf();
+  const blocker = autoUpdateBlocker(skillDir, local);
+  if (!blocker) {
+    const outcome = await tryAutoUpdate(base, local, latest, skillDir);
+    if (outcome.status === "updated") {
+      process.stderr.write(
+        `dj: 已自动把 RooYun skill 从 v${local.version} 更新到 v${outcome.version}。` +
+          `脚本从下次调用起用新版，SKILL.md 的新规则下次加载会话时生效。` +
+          `（关闭自动更新：ROOYUN_SKILL_AUTO_UPDATE=0）\n`,
+      );
+      return;
+    }
+    // 另一个 dj 进程正在更新：它会负责，这里不重复提醒
+    if (outcome.status === "busy") return;
+    noticeManualUpdate(local, latest, base, skillDir, outcome.reason);
+    return;
+  }
+  noticeManualUpdate(local, latest, base, skillDir, blocker);
+}
+
+/** 不能自动更新的原因；null = 可以 */
+function autoUpdateBlocker(skillDir, local) {
+  if (!autoUpdateEnabled()) return "已用 ROOYUN_SKILL_AUTO_UPDATE 关闭自动更新";
+  const kind = installKindOf(skillDir);
+  if (kind === "plugin") return "这是 Claude Code 插件安装，要用插件命令更新";
+  if (kind === "scripts-only") return "这份脚本不在完整的 skill 目录里";
+  // 包里的顶层目录名固定（rooyun / rooyun-cli），解压到父目录：目录名不同就会在旁边多出一份
+  if (pathBasename(skillDir) !== SKILL_NAME_BY_VARIANT[local.variant]) {
+    return `skill 目录名不是 ${SKILL_NAME_BY_VARIANT[local.variant]}，自动更新会在旁边多装一份`;
+  }
+  // 源码仓库里的副本（开发者从仓库直接跑）：覆盖等于改工作区文件
+  if (existsSync(pathJoin(pathDirname(skillDir), ".git"))) return "这是源码仓库里的副本";
+  return null;
+}
+
+/** 落后时的手动更新提示（插件安装给插件命令，其余给 dj update） */
+function noticeManualUpdate(local, latest, base, skillDir, reason) {
+  const command =
+    installKindOf(skillDir) === "plugin"
+      ? `claude plugin marketplace update rooyun && claude plugin update ${local.variant === "cli" ? "rooyun-cli" : "rooyun"}@rooyun`
+      : `node ${skillScriptPath()} update --base ${base}`;
   process.stderr.write(
     `dj: 本地 skill 是 v${local.version}，线上已是 v${latest}。` +
-      `新版可能含新的字段与工作流纪律，旧版不会报错、只是用不到。\n` +
-      `    更新：node ${skillScriptPath()} update --base ${base}\n`,
+      `新版可能含新的字段与工作流纪律，旧版不会报错、只是用不到。` +
+      `${reason ? `（未自动更新：${reason}）` : ""}\n` +
+      `    更新：${command}\n`,
   );
+}
+
+/**
+ * 自动更新一次。返回 { status: "updated", version } / { status: "busy" } / { status: "skipped" | "failed", reason }。
+ *
+ * 两道闸：同一目标版本 24 小时内只试一次（失败也算，别每条命令都去下载）；
+ * 多个 dj 并发（Agent 常并行跑）时用锁文件只放一个进程去解压，其余直接跳过。
+ */
+async function tryAutoUpdate(base, local, latest, skillDir) {
+  const statePath = autoUpdateStatePath();
+  try {
+    const state = JSON.parse(readFileSync(statePath, "utf8"));
+    if (state?.version === latest && Date.now() - Number(state.attemptedAt) < AUTO_UPDATE_RETRY_MS) {
+      return { status: "skipped", reason: state.error ? `上次自动更新失败：${state.error}` : "24 小时内已尝试过" };
+    }
+  } catch {
+    // 没有记录或记录损坏：照常尝试
+  }
+
+  const lockPath = `${statePath}.lock`;
+  let lockFd;
+  try {
+    mkdirSync(pathDirname(statePath), { recursive: true });
+    try {
+      lockFd = openSync(lockPath, "wx");
+    } catch {
+      // 锁已存在：新鲜的锁说明别的进程在更新；残留的锁（进程被杀）删掉再抢一次
+      if (Date.now() - statSync(lockPath).mtimeMs < AUTO_UPDATE_LOCK_STALE_MS) return { status: "busy" };
+      rmSync(lockPath, { force: true });
+      lockFd = openSync(lockPath, "wx");
+    }
+  } catch {
+    return { status: "busy" };
+  }
+
+  try {
+    const result = await installSkillBundle(base, local.variant, pathDirname(skillDir), AUTO_UPDATE_TIMEOUT_MS);
+    const after = readLocalSkillMeta();
+    const error = result.ok ? null : result.reason;
+    try {
+      writeFileSync(statePath, `${JSON.stringify({ version: latest, attemptedAt: Date.now(), error })}\n`);
+    } catch {
+      // 记不下尝试记录只会多试几次，不影响结果
+    }
+    if (!result.ok) return { status: "failed", reason: `自动更新失败：${result.reason}` };
+    return { status: "updated", version: after?.version ?? latest };
+  } finally {
+    closeSync(lockFd);
+    rmSync(lockPath, { force: true });
+  }
+}
+
+/** 本脚本所在的 skill 目录（scripts/ 的上一级）；算不出返回 null */
+function skillDirOf() {
+  try {
+    return pathDirname(pathDirname(fileURLToPath(import.meta.url)));
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * 安装形态：
+ * - full：完整 skill 目录（同级有 SKILL.md），可以原地覆盖；
+ * - plugin：经 Claude Code 插件安装，脚本在插件缓存里，交给插件自己的更新协议；
+ * - scripts-only：Codex 等宿主只把 scripts/ 拷进了项目，不知道该覆盖哪里。
+ */
+function installKindOf(skillDir) {
+  if (!skillDir || !existsSync(`${skillDir}/SKILL.md`)) return "scripts-only";
+  // 判据用插件缓存目录 `plugins/cache/`：设了 CLAUDE_CONFIG_DIR 时缓存不在 ~/.claude 下
+  if (/[\\/]plugins[\\/]cache[\\/]/.test(skillDir)) return "plugin";
+  return "full";
+}
+
+/**
+ * 下载线上 skill 包并解压覆盖到 parent（包里的顶层目录是 rooyun / rooyun-cli）。
+ * 返回 { ok: true } 或 { ok: false, reason, manual? }；不退出进程、不写 stdout，
+ * 手动 update 与自动更新共用。
+ */
+async function installSkillBundle(base, variant, parent, timeoutMs) {
+  const zipUrl = skillBundleUrl(base, variant);
+  const manual = `curl -fsSL -o skill.zip "${zipUrl}" && unzip -o skill.zip -d ${parent}`;
+  // 先下到内存：下载失败时不会在安装目录留下半截内容
+  let bytes;
+  try {
+    const response = await fetch(zipUrl, timeoutMs ? { signal: AbortSignal.timeout(timeoutMs) } : undefined);
+    if (!response.ok) return { ok: false, reason: `下载失败：HTTP ${response.status}` };
+    bytes = Buffer.from(await response.arrayBuffer());
+  } catch (err) {
+    return { ok: false, reason: `下载失败：${err instanceof Error ? err.message : "unknown"}` };
+  }
+  // zip 魔数校验：反代/登录墙返回 HTML 错误页时，unzip 的报错很难懂，不如这里直说
+  if (bytes.length < 4 || bytes[0] !== 0x50 || bytes[1] !== 0x4b) {
+    return { ok: false, reason: `下载到的不是 zip（检查 --base 是否指向 RooYun 站点：${base}）` };
+  }
+  // 变体校验：zip 条目名以明文存在文件头里，顶层目录必须是本变体的。
+  // 防的是 CDN 缓存键忽略查询串、把 `?variant=cli` 回成完整版包——照解不误就会在
+  // 精简版旁边凭空装出一份完整版，两个 skill 抢着触发
+  const expectedEntry = `${SKILL_NAME_BY_VARIANT[variant]}/SKILL.md`;
+  if (!bytes.includes(Buffer.from(expectedEntry))) {
+    return {
+      ok: false,
+      reason:
+        `下载到的包不含 ${expectedEntry}（拿到的不是${variant === "cli" ? "精简版" : "完整版"}），` +
+        `未做任何改动。稍后重试，或按 README 手工安装`,
+    };
+  }
+  const tmp = `${tmpdir()}/rooyun-skill-${randomUUID()}.zip`;
+  writeFileSync(tmp, bytes);
+  // 解压覆盖：Node 无内置 zip 解压，而本脚本零依赖不引第三方库，故调系统 unzip
+  const result = spawnSync("unzip", ["-o", "-q", tmp, "-d", parent], { encoding: "utf8" });
+  rmSync(tmp, { force: true });
+  if (result.error || result.status !== 0) {
+    // 没有 unzip（多见于 Windows）：给出手工命令，绝不假装成功
+    return {
+      ok: false,
+      reason: `解压失败（${result.error?.message ?? `unzip 退出码 ${result.status}`}）`,
+      manual,
+    };
+  }
+  return { ok: true };
 }
 
 /** 本脚本的绝对路径（提示更新命令时给出，用户不必自己找 skill 装在哪） */
@@ -3493,20 +3686,14 @@ async function cmdVersion(ctx, { flags }) {
  * 两者都不需要重启 Claude Code。
  */
 async function cmdUpdate(ctx, { flags }) {
-  let skillDir = null;
-  try {
-    skillDir = pathDirname(pathDirname(fileURLToPath(import.meta.url)));
-  } catch {
-    skillDir = null;
-  }
+  const skillDir = skillDirOf();
+  const kind = installKindOf(skillDir);
+  const local = readLocalSkillMeta();
   // 只有「完整 skill 目录」才敢原地覆盖：判据是同级真有 SKILL.md。
   // Codex 等宿主常常只把 scripts/ 拷进项目里，那种布局下 skillDir 会算到项目根
   // （甚至项目外），照着解压等于在无关目录里凭空造一个 rooyun/，而用户真正在用的
   // 那份脚本一点没变——「更新成功了却没生效」比不更新更难查。
-  const isFullInstall =
-    skillDir !== null && existsSync(`${skillDir}/SKILL.md`);
-  const local = readLocalSkillMeta();
-  if (!isFullInstall) {
+  if (kind === "scripts-only") {
     const remoteMeta = await fetchRemoteSkillMeta(ctx.base, local.variant);
     process.stderr.write(
       `dj: 这份脚本不在完整的 skill 目录里（同级没有 SKILL.md），不敢猜该覆盖哪个目录。\n` +
@@ -3520,8 +3707,7 @@ async function cmdUpdate(ctx, { flags }) {
   }
   // 经 Claude Code 插件安装（公开仓库 DeepHiveAI/rooyun-skill 的 marketplace）时，脚本在插件缓存里：
   // 原地覆盖会在下次插件更新时被整目录换掉，版本还和插件记录对不上——交给插件自己的更新协议
-  // 判据用插件缓存目录 `plugins/cache/`：设了 CLAUDE_CONFIG_DIR 时缓存不在 ~/.claude 下
-  if (/[\\/]plugins[\\/]cache[\\/]/.test(skillDir)) {
+  if (kind === "plugin") {
     process.stderr.write(
       `dj: 这份 skill 是经 Claude Code 插件安装的，请用插件命令更新，再在会话里执行 /reload-plugins：\n` +
         `      claude plugin marketplace update rooyun\n` +
@@ -3542,55 +3728,20 @@ async function cmdUpdate(ctx, { flags }) {
     );
     return;
   }
-
-  // 拉与本地同一个变体的包：精简版里跑 update 不能凭空装出一份完整版
-  const zipUrl = skillBundleUrl(ctx.base, local.variant);
-  const tmp = `${tmpdir()}/rooyun-skill-${randomUUID()}.zip`;
   if (flags["dry-run"]) {
+    // 拉与本地同一个变体的包：精简版里跑 update 不能凭空装出一份完整版
     process.stdout.write(
-      `将执行：\n  curl -fsSL -o ${tmp} "${zipUrl}"\n  unzip -o ${tmp} -d ${parent}\n`,
+      `将执行：\n  curl -fsSL -o <临时文件> "${skillBundleUrl(ctx.base, local.variant)}"\n  unzip -o <临时文件> -d ${parent}\n`,
     );
     return;
   }
-
-  // 先下到临时文件：下载失败时不会在安装目录留下半截内容
-  let bytes;
-  try {
-    const response = await fetch(zipUrl);
-    if (!response.ok) fail(`下载失败：HTTP ${response.status}`);
-    bytes = Buffer.from(await response.arrayBuffer());
-  } catch (err) {
-    fail(`下载失败：${err instanceof Error ? err.message : "unknown"}`);
-  }
-  // zip 魔数校验：反代/登录墙返回 HTML 错误页时，unzip 的报错很难懂，不如这里直说
-  if (bytes.length < 4 || bytes[0] !== 0x50 || bytes[1] !== 0x4b) {
-    fail(`下载到的不是 zip（检查 --base 是否指向 RooYun 站点：${ctx.base}）`);
-  }
-  // 变体校验：zip 条目名以明文存在文件头里，顶层目录必须是本变体的。
-  // 防的是 CDN 缓存键忽略查询串、把 `?variant=cli` 回成完整版包——照解不误就会在
-  // 精简版旁边凭空装出一份完整版，两个 skill 抢着触发
-  const expectedEntry = `${SKILL_NAME_BY_VARIANT[local.variant]}/SKILL.md`;
-  if (!bytes.includes(Buffer.from(expectedEntry))) {
-    fail(
-      `下载到的包不含 ${expectedEntry}（拿到的不是${local.variant === "cli" ? "精简版" : "完整版"}），` +
-        `未做任何改动。稍后重试，或按 README 手工安装`,
-    );
-  }
-  writeFileSync(tmp, bytes);
-
-  // 解压覆盖：Node 无内置 zip 解压，而本脚本零依赖不引第三方库，故调系统 unzip
-  const result = spawnSync("unzip", ["-o", "-q", tmp, "-d", parent], {
-    encoding: "utf8",
-  });
-  rmSync(tmp, { force: true });
-  if (result.error || result.status !== 0) {
-    // 没有 unzip（多见于 Windows）：给出手工命令，绝不假装成功
-    process.stderr.write(
-      `dj: 自动解压失败（${result.error?.message ?? `unzip 退出码 ${result.status}`}）。请手工执行：\n` +
-        `    curl -fsSL -o skill.zip "${zipUrl}"\n` +
-        `    unzip -o skill.zip -d ${parent}\n`,
-    );
-    process.exit(EXIT.apiError);
+  const result = await installSkillBundle(ctx.base, local.variant, parent);
+  if (!result.ok) {
+    if (result.manual) {
+      process.stderr.write(`dj: ${result.reason}。请手工执行：\n    ${result.manual}\n`);
+      process.exit(EXIT.apiError);
+    }
+    fail(result.reason);
   }
 
   const after = readLocalSkillMeta();

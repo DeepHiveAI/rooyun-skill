@@ -160,7 +160,9 @@ unzip -o /tmp/rooyun-cli.zip -d ~/.claude/skills    # 落点 ~/.claude/skills/ro
 
 ### 更新
 
-**每条 API 响应都带线上最新版本号**，本地落后时脚本会在 stderr 提醒一次。看到提醒就跑：
+**1.52.0 起自动更新**：每条 API 响应都带线上最新版本号，本地落后时 `dj` 收到第一条响应时顺带把自己更新到新版（下载最多多等 20 秒，失败不影响当前命令）
+（同一版本 24 小时内只试一次；多个 dj 同时运行只有一个去更新）。不想自动更新就设 `ROOYUN_SKILL_AUTO_UPDATE=0`。
+插件安装、只拷了 scripts/ 的安装、目录名不是 `rooyun` 的安装不会自动更新，只在 stderr 提醒。看到提醒就跑：
 
 ```sh
 node ~/.claude/skills/rooyun/scripts/dj.mjs update --pretty

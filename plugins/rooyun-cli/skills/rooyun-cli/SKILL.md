@@ -1,6 +1,6 @@
 ---
 name: rooyun-cli
-version: 1.51.1
+version: 1.52.0
 releasedAt: 2026-11-01
 description: RooYun 精简版（CLI 自由模式）：只告诉你终端里的 dj.mjs 能调哪些能力、各产出什么——文生图、图生图/编辑、图生视频、首尾帧、参考图生视频、数字人口播、配音、音乐、音效、视频高清、视频转白模、上传素材、下载产物，以及可选的画布读写和平台 LLM 辅助（提示词优化、参考图/参考片反推提示词、剧本拆解）。不预设创作流程：提示词怎么写、先做什么后做什么、用哪个模型、要不要画布，全由用户决定。当用户说「用 RooYun 生成一张图 / 一段视频」「我自己写提示词」「别走固定流程」「直接调 RooYun 的工具」「rooyun-cli」，或提到 RooYun、ROOYUN_API_TOKEN 且想自己掌控创作时使用。生成会花用户的真钱，任何生成前先报价并等用户确认。
 ---
@@ -33,7 +33,7 @@ dj me --pretty  # 开工第一件事：确认令牌有效、scope 够用
 
 令牌保存在本机 `~/.rooyun/credentials.json`，之后每条命令自动带上。环境变量 `ROOYUN_API_TOKEN`
 优先级更高；`ROOYUN_API_BASE` 默认 `https://www.rooyun.com`。说不清的怪状况先跑 `dj doctor --pretty`；
-看到「线上已是 vX」就 `dj update --pretty`。每条命令的完整参数：`dj --help`。
+`dj` 落后时会自动更新自己（`ROOYUN_SKILL_AUTO_UPDATE=0` 关闭）；看到「线上已是 vX」的提醒就 `dj update --pretty`。每条命令的完整参数：`dj --help`。
 
 ## 四条铁律（只有这四条，不可放宽）
 
