@@ -48,7 +48,7 @@ const DEFAULT_BASE = "https://www.rooyun.com";
  *
  * 它不是第二个真相源：生成脚本从 SKILL.md 派生写入，两处不一致时构建就红。
  */
-const EMBEDDED_SKILL_VERSION = "1.49.0";
+const EMBEDDED_SKILL_VERSION = "1.50.0";
 
 /**
  * 单次 HTTP 请求的**空闲**超时（毫秒）：两次收到字节之间允许的最大间隔，
@@ -353,7 +353,12 @@ async function readBodyWithProgress(response, onProgress) {
  */
 async function request(ctx, method, path, body, opts = {}) {
   const url = `${ctx.base}/api/v1${path}`;
-  const headers = { authorization: `Bearer ${ctx.token}`, accept: "application/json" };
+  const headers = {
+    authorization: `Bearer ${ctx.token}`,
+    accept: "application/json",
+    // 自报本地 skill 版本：落后时服务端在错误的 suggestion / meta.skillUpdate 里提示更新
+    "x-rooyun-skill-version": localSkillVersion(),
+  };
   // FormData 的 content-type 必须由 fetch 自己带（里面有 multipart 边界串），
   // 手写会让服务端解析不出文件字段；Content-Length 也由它按 Blob 大小自动算出
   const isForm = typeof FormData !== "undefined" && body instanceof FormData;
@@ -417,6 +422,13 @@ async function request(ctx, method, path, body, opts = {}) {
   // 顺带看一眼服务端带回的最新版本号（每条 v1 响应都带），落后就提醒一次
   noticeSkillUpdate(response.headers.get("x-skill-latest"), ctx.base);
   return { status: response.status, headers: response.headers, envelope };
+}
+
+/** 本进程内的本地 skill 版本（请求头自报用；只读一次 SKILL.md，update 后的复读不走这里） */
+let localSkillVersionCache;
+function localSkillVersion() {
+  localSkillVersionCache ??= readLocalSkillMeta().version;
+  return localSkillVersionCache;
 }
 
 /** 本进程是否已提醒过更新（一次运行只说一次，别把 stderr 刷满） */
