@@ -7,6 +7,8 @@
 
 **一律按 `error.code` 分支，不要按 HTTP 状态码，更不要按 `message` 文案**（文案随时会改措辞）。
 `dj.mjs` 失败时 stdout 仍是完整信封，stderr 给人读提示（含服务端的 `suggestion`）。
+`error.message` 是按错误码统一的固定说明；**这一次具体错在哪在 `meta.detail`**（缺哪个字段、该用哪个
+taskId、截短的节点 id 对应哪张卡），stderr 里以「详情：」打出。改请求前先看它。
 
 错误对象还带 `retry`：`safe` = 原样重试有意义 / `backoff` = 等一会再试 / `futile` = 原样重试没用，
 必须改东西。下表没列到的码按它处置。`message` / `suggestion` 是给终端用户看的中文，可以直接转述；

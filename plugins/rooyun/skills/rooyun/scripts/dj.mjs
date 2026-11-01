@@ -48,7 +48,7 @@ const DEFAULT_BASE = "https://www.rooyun.com";
  *
  * 它不是第二个真相源：生成脚本从 SKILL.md 派生写入，两处不一致时构建就红。
  */
-const EMBEDDED_SKILL_VERSION = "1.51.0";
+const EMBEDDED_SKILL_VERSION = "1.51.1";
 
 /**
  * 单次 HTTP 请求的**空闲**超时（毫秒）：两次收到字节之间允许的最大间隔，
@@ -681,8 +681,14 @@ function handle(ctx, result, prettyRenderer) {
   process.stdout.write(`${JSON.stringify(envelope, null, ctx.pretty ? 2 : 0)}\n`);
   const hint = hintFor(realStatus, code, envelope?.meta, envelope?.error);
   const suggestion = envelope?.error?.suggestion;
+  // 具体原因：error.message 是按错误码统一的固定说明，调用点给的具体原因（缺哪个字段、
+  // 该用哪个 taskId、截短的节点 id 对应哪张卡…）在 meta.detail。不打印它，读摘要的
+  // 智能体只看得到「资源不存在」这类笼统话，又会原样重试
+  const detail = envelope?.meta?.detail;
   process.stderr.write(
-    `dj: HTTP ${realStatus} ${code} — ${message}${hint ? `\n    → ${hint}` : ""}` +
+    `dj: HTTP ${realStatus} ${code} — ${message}` +
+      `${typeof detail === "string" && detail && detail !== message ? `\n    详情：${detail}` : ""}` +
+      `${hint ? `\n    → ${hint}` : ""}` +
       `${typeof suggestion === "string" && suggestion ? `\n    建议：${suggestion}` : ""}\n`,
   );
   process.exit(exitCodeFor(realStatus, code));
