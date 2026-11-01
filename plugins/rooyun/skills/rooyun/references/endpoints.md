@@ -45,9 +45,9 @@
 | `edit-session revoke <sessionId>` | `DELETE /api/v1/edit-sessions/{id}` | `canvas:write` |
 | `precheck` | `POST /api/v1/generations/precheck` | `generate` |
 | `generate` | `POST /api/v1/generations` | `generate` |
-| `task <id> [--watch]` | `GET /api/v1/generations/{id}` | `tasks:read` |
+| `task <taskId> [--watch]` | `GET /api/v1/generations/{taskId}` | `tasks:read` |
 | `tasks [--status active\|all] [--canvas <id>] [--request <id>]` | `GET /api/v1/generations` | `tasks:read` |
-| `cancel <id>` | `POST /api/v1/generations/{id}/cancel` | `generate` |
+| `cancel <taskId>` | `POST /api/v1/generations/{taskId}/cancel` | `generate` |
 | `assets list [--project p]` | `GET /api/v1/assets`、`/projects/{id}/assets` | `assets:read` |
 | `assets get <assetId>` | `GET /api/v1/assets/{id}` | `assets:read` |
 | （download.mjs 内部） | `GET /api/v1/assets/{id}/download` → 302 | `assets:read` |
@@ -137,7 +137,7 @@ dj canvas structure "$CANVAS" | jq -r '.data.nodes[] | select(.title=="镜1 推�
 | `canvas structure` | `{version, canvasId, projectId, canvasKey, nodes[], edges[]}` — 加 `--full`（`?detail=full`）时每个 `nodes[i]` 多一个 `detail: {body?, params, config?}`：正文全文（缺省的 `summary` 截到 600 字）+ 全部可写参数，与 `dj node` 同一口径（读回什么就能改什么）。`detail` 只认 `full`，其它值 400 `invalid_request`。大画布响应会明显变大，只要拓扑/nodeId 时别带 |
 | `canvas lint` | `{version, canvasId, findings: [{rule, severity:"error"\|"warn", nodeId?, nodeTitle?, names?[], message}], summary:{errors, warnings}, references: [{nodeId, nodeTitle, references:[{index, tag, assetId, sourceNodeId?, via, label?}], truncated?}]}` — 规则四条：`video_missing_reference`（视频卡上游没有任何已出图的参考，error）· `board_not_generated`（被下游引用的设定板自己还没出图，error，`names` 列板名）· `hub_empty`（空引用坞连了下游，warn）· `prompt_names_unlinked`（提示词点了某个设定板的名字、这张卡却没连它，warn，`names` 列是哪几个——**改过 prompt 之后最容易撞上**）。**`summary.errors` 不为 0 就别提交生成**，命令退出码 2。`references` 是每张待出片视频卡的**参考解析预演**：`tag` 直接抄进提示词、`label` 是「这张参考是谁」，顺序与真正提交时逐位一致 |
 | `precheck` | `{enabled, total, balance, available, ok, items: [{credits, priced}]}` — `available` 才是本批可用（含赠送积分），`balance` 只是充值积分 |
-| `generate` | `{taskId, status, canvasId?, nodeId?, heldCredits?}` + `meta{resolvedReferences?, promptCompile?, warnings?}` — `heldCredits` 是**冻结额**（最多花这么多），不是实扣。**`meta` 里那三位都要看**：`resolvedReferences` 是服务端替你填的参考及来源（逐条核对）；`promptCompile.applied` 是平台补了哪几段提示词（没有这一位=一个字都没动）；**`warnings` 是「提示词点了某个设定板的名字，但这张卡没连它」**——不阻断提交，但十有八九就是「人物每镜换脸」那个事故，看到就该停下来改边而不是等出片 |
+| `generate` | `{taskId, status, canvasId?, nodeId?, heldCredits?}` + `meta{resolvedReferences?, promptSource?, promptCompile?, warnings?}` — **之后查询、取消都用 `taskId`**（不是你生成的 requestId）。`promptSource` 只在没给 `params.prompt`、服务端改用目标卡上的提示词时出现。`heldCredits` 是**冻结额**（最多花这么多），不是实扣。**`meta` 里那三位都要看**：`resolvedReferences` 是服务端替你填的参考及来源（逐条核对）；`promptCompile.applied` 是平台补了哪几段提示词（没有这一位=一个字都没动）；**`warnings` 是「提示词点了某个设定板的名字，但这张卡没连它」**——不阻断提交，但十有八九就是「人物每镜换脸」那个事故，看到就该停下来改边而不是等出片 |
 | `tasks` | `{tasks: [{taskId, status, capability, requestId?, canvasId?, nodeId?, assetId?, createdAt, updatedAt}]}` + `meta{total, limit, offset}` — **状态丢了就用它**：缺省只列在途（`--status all` 看历史），可按 `--canvas` / `--request` 过滤。⚠️ `status` 是**库里的快照、不轮询上游**，可能滞后——要准确状态（以及触发终态落卡）仍要逐条 `dj task <taskId>`。`requestId` 是你提交时的幂等键，拿它和自己的记录对上号 |
 | `task` | `{taskId, status, progress?, assetId?, error?, capability, canvasId?, nodeId?, landedTo, chargedCredits?, cancelRequested?, prompts?}` + `meta{pollAfterMs}` — **终态的 `chargedCredits` 才是实扣**，收尾汇报逐笔累加它。`prompts.applied` 是**平台补了哪几段**的段名（与提交回执 `meta.promptCompile.applied` 同源）；`prompts.submitted`（你提交的原文）**只在两种情况下回显**：提交时传了 `promptCompile:"off"`，或平台一段都没补（`prompts.applied` 为空）——其余情况只回段名、不回编译后的全文，要逐字可控就传 `off`（原文本就在你手里）。**没有编译记录的老任务两位都不回显**。`prompts.final` 只在走**图片改写链路**时出现，视频链路恒缺席——别拿它判断「平台改没改」 |
 | `chat new` | `{conversation: {conversationId, agentId, modelId, title, kind, createdVia, createdAt, updatedAt, lastSeq}}` + `meta{billingUnit, stagesPerTurn, perRoundCredits, estimatedTurnCredits}` — **`conversationId` 就是这段创作的全部状态**，存进你的「任务 → conversationId」表。建会话不扣钱，但 **`meta.estimatedTurnCredits` 就是下一轮的报价**（`null` = 该模型未配价、发轮会被 503 拒，**不是免费**） |
@@ -200,13 +200,13 @@ dj canvas structure "$CANVAS" | jq -r '.data.nodes[] | select(.title=="镜1 推�
 | capability | 必填输入（在 `params` 内，`ref2v` 除外） | 常用可选 |
 |---|---|---|
 | `t2i` 文生图 | `prompt` | `size`(1k/2k/4k)、`aspectRatio`、`seed`、`quality`、`watermark`、**`transparentBackground`**（透明底 PNG，见下节）、顶层 `referenceAssetIds`、**`mask`**（局部重绘，见下节） |
-| `i2i` 图生图/编辑/放大/抠图 | `image` | `prompt`、`operation`(edit/upscale/removebg/look，**`removebg` 要先按 `image.removebg` 挑模型，见下节**)、`size`(1k/2k/4k，决定输出档位与计价倍率，放大请显式给)、`aspectRatio`（放大时与源图一致）、`quality`、`seed` |
-| `i2v` 图生视频 | `firstFrame` | `prompt`、`durationSec`、`resolution`(480p…4k，按模型目录)、`aspectRatio`、`audio` |
-| `flf2v` 首尾帧生视频 | `firstFrame` + `lastFrame` | 同 `i2v` |
-| `ref2v` 参考图生视频 | 顶层 `referenceAssetIds`（≥1，最多 9） | 同 `i2v`、顶层 **`referenceAudioAssetIds`**（锁角色音色，见「角色音色一致性」章；加顶层 `referenceAudioMode: "fully_copy"` 则改为**原样复用这段音频当成片声音**，如唱用户的歌：仅 H3 全参考、恰好一段、≤15 秒，时长跟随音频）、顶层 **`referenceVideoAssetIds`**（≤3 段，动作/运镜参考，见「白模换角」章） |
+| `i2i` 图生图/编辑/放大/抠图 | `image`（源图 assetId；**不读**顶层 `referenceAssetIds`） | `prompt`、`operation`(edit/upscale/removebg/look，**`removebg` 要先按 `image.removebg` 挑模型，见下节**)、`size`(1k/2k/4k，决定输出档位与计价倍率，放大请显式给)、`aspectRatio`（放大时与源图一致）、`quality`、`seed` |
+| `i2v` 图生视频 | `firstFrame` + `prompt`（带 `canvasId`/`nodeId` 且不给时取卡上的提示词） | `durationSec`（1–15，越界 400）、`resolution`(480p…4k，按模型目录)、`aspectRatio`、`audio` |
+| `flf2v` 首尾帧生视频 | `firstFrame` + `lastFrame` + `prompt`（同 `i2v`，可取卡上的） | 同 `i2v` |
+| `ref2v` 参考图生视频 | 顶层 `referenceAssetIds`（≥1，最多 9；带 `canvasId`/`nodeId` 时可按画布边自动解析）+ `prompt`（同 `i2v`，可取卡上的） | 同 `i2v`、顶层 **`referenceAudioAssetIds`**（锁角色音色，见「角色音色一致性」章；加顶层 `referenceAudioMode: "fully_copy"` 则改为**原样复用这段音频当成片声音**，如唱用户的歌：仅 H3 全参考、恰好一段、≤15 秒，时长跟随音频）、顶层 **`referenceVideoAssetIds`**（≤3 段，动作/运镜参考，见「白模换角」章） |
 | `avatar` 数字人口播 | `drivingAudio` + （`firstFrame` 或 `motionVideo` 至少一个；或管理员的专属数字人 `digitalHumanId`，见下节） | `prompt`、`aspectRatio`（见下节） |
 | `t2a` 配音 | `text` + 音色（`voiceId` 或 `voiceName` 二选一，先 `dj voices` 挑；不传 = 400 不扣费，平台不替你挑默认嗓子） | `speed`、`emotion`、`styleText`、`moodId`、**`emoVector`+`emoAlpha`**（8 维情感向量+强度，成对）、**`durationFactor`**（模型内变速，与 `speed` 互斥）——后三个要先按 `audio` 能力位挑模型，见「配音情绪向量」节。**GM 模型**用 `styleText`（一句自然语言风格指令，≤100 字、不含括号）表达情绪与语速，`emotion` 对它不生效；台词里的停顿 `<#0.5#>` 与语气词由服务端转成 GM 标签 |
-| `music` 音乐 | `text` | `lyrics`、`instrumental`、`durationSec` |
+| `music` 音乐 | `text`（风格描述，对应音乐卡上的「风格」`musicStyle`） | `lyrics`、`instrumental`、`durationSec` |
 | `sfx` 音效 | `text` | `durationSec`（0.5–30） |
 | `upscale` **视频**高清 | `video` | `targetResolution`(1080p/2k) |
 | `v2a` 视频抽音轨 | `video` | `dryVoice`(干声分离)、`transcribe`(转写比对台词，缺省开)——定嗓样本提取用，见「角色音色一致性」章 |
@@ -274,7 +274,7 @@ MODEL=$(dj models --capability i2i | jq -r '
 
 dj generate --request-id "$(uuidgen | tr 'A-Z' 'a-z')" --model "$MODEL" \
   --capability i2i \
-  --params "{\"image\":\"$ASSET_ID\",\"operation\":\"removebg\"}"
+  --params-json "{\"image\":\"$ASSET_ID\",\"operation\":\"removebg\"}"
 ```
 
 两条纪律：
@@ -429,10 +429,10 @@ dj generate --request-id "$RID1" --model "$MODEL" --capability t2a \
 **`text` 里别写【情绪】标签**。v1 把 `text` 原样交给上游朗读，服务端不解析也不剥离
 【】标签——写了会被当台词念出来。
 
-**④ 报价**：precheck 里 t2a 的 `params` 留空 `{}` 即可——配音的计费时长由服务端定，
-传 `durationSec` 也会被忽略。IndexTTS 2.5 这类自建 TTS 是 `per_second` 计价，但配音请求
-不带时长，冻结按缺省 10 秒、结算按冻结额——**每次调用（每一段）固定 = 单价 × 10**，与台词长短
-无关。分 N 段就在 precheck 的 `items` 里放 N 项，`total` 就是实扣。
+**④ 报价**：precheck 里 t2a 的 `params` 带上 `text`（台词原文，可加 `speed` / `durationFactor`）——
+服务端按台词估算计费时长，与提交时冻结同一份估算；传 `durationSec` 会被忽略。IndexTTS 2.5 这类
+自建 TTS 是 `per_second` 计价：冻结按估算时长（刻意偏长），落地后按真实时长退差。不带 `text`
+只能按缺省 10 秒报一个不准的数。分 N 段就在 precheck 的 `items` 里放 N 项。
 
 **⑤ 一段台词要换几次情绪**：v1 没有分段字段，也不在服务端拼接。**由你驱动时走这条**：
 逐段各调一次 v1（同一个 `voiceName`、各段自己的 `emoVector` / `emoAlpha`，每段一个存下来的

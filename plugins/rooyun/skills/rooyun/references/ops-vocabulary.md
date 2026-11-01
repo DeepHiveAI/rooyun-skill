@@ -204,6 +204,9 @@ assetId 必须属于你这枚令牌的账号、且已在云端，否则 op 级 `
    `client_ref_not_found`（`@ref` 没定义或定义在本 op 之后——检查拼写与顺序） /
    `client_ref_duplicate`（同一个 `@ref` 定义了两次） /
    `not_executed`（前序已失败，本 op 根本没跑）。
+   回滚批里本 op 自身没问题的那几条是 `ok: true` + `rolledBack: true`，**不带 `nodeIds`**——
+   那些卡从未写入，别拿任何 id 去读卡。指向已有卡的 op 字段名一律是 `nodeId`（写成 `id` / `cardId`
+   会 400，报错里会点名）。
 3. **`createSceneSet` ≠ `createCard kind:"scene"`**。前者建的是**场景设定板**（带
    `anchor.kind = "scene"`，会被分镜自动连参考边）——搭工程要的是它。后者是通用卡的一种
    卡型，不带身份锚、不参与自动连线。角色同理：角色设定板只能用 `createCharacterBoard`。

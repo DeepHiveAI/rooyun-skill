@@ -72,7 +72,7 @@ HTTP 状态码恒为 200**，真实状态码改放在信封的 `meta.httpStatus`
 | `agent_unknown` | 400 | `agentId` 不在目录里、已下线，或这段会话没绑定 Agent。先 `dj agents` 抄准 id——会话建好后 Agent **不可改**，换 Agent = 新建一段会话 |
 | `turn_incomplete` | 502 | 一轮跑完了却没能落库成消息。用**同一个 `requestId`** 重发（幂等，不重复扣费）；仍失败就 `dj chat history` 看会话停在哪一 `seq` |
 | `service_unavailable` | 503 | 服务暂时不可用，稍等片刻后重试 |
-| `internal_error` | 500 | 服务内部错误。等 1–2 分钟再试；多次出现就停下，把 `requestId` 给用户请他联系我们 |
+| `internal_error` | 500 | 服务内部错误。等 1–2 分钟再试；多次出现就停下，把错误里的 `error.traceId`（追踪号，不是任务号）给用户请他联系我们 |
 
 ### 任务终态的三个坑
 

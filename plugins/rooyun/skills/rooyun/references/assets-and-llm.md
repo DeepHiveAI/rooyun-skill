@@ -190,6 +190,7 @@ done
 
 # ⑤ 拆分镜（整集一次拆完，别逐场重拆）：把已落板的名字与外观锚传回去
 CAST=$(printf '%s' "$CHARS" | jq -r '[.data.characters[].name] | join(",")')
+# anchor 上限 60 字，超了 400：只放硬特征（年龄档/体型/主色），别把 look 全文塞进来
 printf '%s' "$CHARS" | jq '[.data.characters[] | {name, anchor: .shotInjection}]' > /tmp/anchors.json
 SB=$(dj storyboard --script ./ep1.txt --cast "$CAST" --scenes "<场景名,…>" --anchors /tmp/anchors.json)
 

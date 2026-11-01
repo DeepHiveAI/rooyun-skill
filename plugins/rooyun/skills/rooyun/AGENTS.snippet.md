@@ -1,5 +1,5 @@
 <!--
-  rooyun-skill-version: 1.50.0
+  rooyun-skill-version: 1.51.0
 
   把下面 `## RooYun 开放 API` 整段粘进你项目的 AGENTS.md（Codex）或等价的长期指令文件，
   并把 rooyun-skill/scripts/ 放到 Agent 能执行到的位置（零依赖，Node ≥ 18）。
@@ -59,8 +59,8 @@ node scripts/dj.mjs login   # ② 再跑一次：等待授权（最多 90s），
    重发会原样返回第一次那个任务（首次参数生效），所以「改词重生成」必须用新 requestId、
    也会付两次钱。提交限流 10/分/令牌、20/分/账号，正确姿势是「整批预检 → 逐条提交 → 轮询」。
    **那张本地表丢了别重发**：`dj tasks` 把现场捞回来（缺省只列在途，可 `--canvas` / `--request`
-   过滤；它不轮询上游，捞回 taskId 后拿准确状态仍用 `dj task <id>`）。
-5. **轮询遵守建议间隔**：用 `dj.mjs task <id> --watch`（已按服务端 `pollAfterMs` 配退避，
+   过滤；它不轮询上游，捞回 taskId 后拿准确状态仍用 `dj task <taskId>`）。
+5. **轮询遵守建议间隔**：用 `dj.mjs task <taskId> --watch`（已按服务端 `pollAfterMs` 配退避，
    封顶 15s，默认等 1800s 后退出码 6 = 仍在跑而非失败）。不要自写 while 循环高频打。
    视频分钟级、图片音频十几秒到两分钟。
 6. **搭建完成后汇报画布链接**（用响应里的 `url` 字段拼，别自己拼路径）并提示用户
@@ -77,8 +77,8 @@ node scripts/dj.mjs login   # ② 再跑一次：等待授权（最多 90s），
    **计费分叉读 `meta.billingUnit`**：`extract`/`storyboard`/`rewrite` 是 `per_round`
    （扣积分，一次调用算一轮，与输出长度无关）；`caption` 扣积分（图片 `per_call` 0.1/次、
    视频 `per_second` 0.1/秒，调用前报价）；`inspect` 是 `free`（不扣积分，但仍受 `llm` scope 与限流约束）。
-   视觉端点素材一律先 `dj upload` 换 assetId（不收 dataURL/URL/路径，单张 ≤1.4MB
-   且服务端不降采样，视频要你自己抽帧）。质检里 `checks` 没有的维度 = 缺基准**没判**
+   视觉端点素材一律先 `dj upload` 换 assetId（不收 dataURL/URL/路径，超过约 1.4MB
+   的图服务端会自动缩小，视频要你自己抽帧）。质检里 `checks` 没有的维度 = 缺基准**没判**
    而非通过，`meta.mock=true` 是演示产物没有信息量——两者都别当结论转述。
 9. **需要人工介入的步骤，签发编辑链接交给用户，说明有效期，然后去做别的事。**
    局部重绘要重画画面的哪一块，用文字描述永远是猜——`dj edit-session create <canvasId>

@@ -1,6 +1,6 @@
 ---
 name: rooyun
-version: 1.50.0
+version: 1.51.0
 releasedAt: 2026-11-01
 description: 用自然语言驱动 RooYun（短剧 AI 创作工作台）的开放 API：建项目与无限画布、按「剧本 → 角色/场景/道具 → 分镜视频卡 → 生成」的固定顺序搭画布、用平台 LLM 把剧本拆成结构化的角色/场景/道具/分镜再落成卡片、调模型生成图片视频音频并自动落回卡片、把一段现成视频转成白模再让新角色复刻它的动作与运镜、反推参考素材的提示词、质检分镜图、下载产物到本地、把抖音视频分享链接解析成可直接下载的视频直链，供本地看片做对标分析；以及选题情报一条链：读每日频道简报（选题 + 「AI 数字人做不做得了」的可执行性判断 + 对标参考）、订阅对标博主并按增速看谁在起来、查热榜与每日选题报告、检索文案库看别人的爆款是怎么写的（钩子/段落节奏/CTA）。当用户说「用 RooYun 生成分镜 / 把我的剧本做成视频工程 / 拆一下这个剧本的角色 / 在 RooYun 里建个项目 / 把这段视频换成我的角色重演 / 下载我 RooYun 项目的产物 / 查我 RooYun 还剩多少积分 / 帮我把这条抖音视频下下来看看 / 抓一下这个抖音博主的视频 / 今天做什么选题 / 帮我盯着这几个对标博主 / 别人这条爆款是怎么写的 / 看看今天的选题简报」，或提到 RooYun、rooyun.com、ROOYUN_API_TOKEN 时使用本技能。生成类会花用户的真钱，任何生成前必须先报价并等用户确认；选题情报那条链全部只读、不扣积分。
 ---
@@ -43,7 +43,7 @@ RooYun 是「无限画布 + AI Agent」的短剧创作工作台。你通过 v1 �
 | **复刻验收** | 片子做完别只凭感觉说「像」：把自己的成片按同一套管线拆一遍（`dj reference-analyze --asset <assetId>`），再 `dj reference-compare <参考片jobId> <成片jobId>` 出结构 diff——**参考片有、成片一次都没出现的功能**（丢了 proof 就是漏了证据环节）、必保维度有没有保住。纯计算不花钱；判定只是提示**不是门禁**（只比叙事结构，不比观感画质），成片仍要你亲自看完 |
 | **赛道结构模板** | 拆过 2–12 条同赛道的片子后，`dj reference-template <jobId> …` 归纳共性：骨架序列、每个环节的出现率（`cta 0.67` = 三条里一条不带 CTA）、功能组成占比、各维度「换掉就垮」的共识。纯计算不花钱 |
 | **改编参考视频** | 拿上面那份账本，`dj reference-adapt <jobId> --presenter "…" --product "…"` → **同一套叙事结构、不同内容**的新段落清单：服务端逐段按该段的「可换/必保」判定决定改不改，命中「必保」的不改并如实标出。`function`/`intent`/段数全部保留，只有台词与画面要求是新的；`--script-md` 直接出可粘进剧本卡的分段文案 |
-| **今天做什么选题** | 读平台替用户**持续采集**的选题情报：订阅的对标博主在涨什么、哪条作品在加速、今天的热榜与日报、以及一份每日**频道简报**（选题 + 「这条 AI 数字人做不做得了」的可执行性判断 + 对标参考）。全部只读、**不花钱**——数据是后台 cron 早就采好的（见「选题情报」章，[`references/topic-intel.md`](references/topic-intel.md)） |
+| **今天做什么选题** | 读平台替用户**持续采集**的选题情报：订阅的对标博主在涨什么、哪条作品在加速、今天的热榜与日报、以及一份每日**频道简报**（选题 + 「这条 AI 数字人做不做得了」的可执行性判断 + 对标参考）。全部只读、**不花钱**——数据是后台 cron 早就采好的（见「选题情报」章，[`references/topic-intel.md`](references/topic-intel.md)）。**按账号开通**：返回 `radar_not_enabled` 时整条链都不可用，别换端点重试，告诉用户联系我们开通 |
 | **别人这条爆款怎么写的** | 文案库给**转写全文 + 方法拆解**：钩子怎么起、结构怎么走（每段功能 + 时长占比）、CTA 怎么收，中英各一套归一化，可按关键词/表现分档检索。写稿前先看同题材别人怎么写，比空想开头有效得多——**拿结构写自己的稿，别照搬原文** |
 
 做不到的（不要假装能做）：实时协同、操作导演台 3D 场景 / 配方 / 编组、
@@ -126,9 +126,9 @@ node ~/.claude/skills/rooyun/scripts/dj.mjs update --pretty
 ```sh
 # ① 整批报价（一次最多 100 项）。-f 的文件形状：
 #    {"items":[{"model":"<模型id>","capability":"t2i","params":{"size":"1k"}}, …]}
-#    也收裸数组 [ …items… ]。注意 precheck 的 params 只认影响价格的键：
-#    durationSec / resolution / size / targetResolution，以及配音专用的 text / speed / durationFactor
-#    （传别的会 400）。
+#    也收裸数组 [ …items… ]。可以把 generate 的请求体原样发来：报价只看影响价格的键
+#    durationSec / resolution / size / targetResolution，以及配音专用的 text / speed / durationFactor，
+#    prompt / aspectRatio / 素材引用 / requestId 等会被忽略；拼错的键（如 duration）仍会 400。
 #    配音 t2a 要传 text（台词原文，可加 speed）才能拿到按秒的准价——服务端按台词估算时长，
 #    与提交时冻结同一份估算；不传 text 只会按缺省时长报一个不准的数
 node scripts/dj.mjs precheck -f /tmp/batch.json --pretty
@@ -226,11 +226,11 @@ dj tasks --request "$RID" --pretty      # 幂等键还在、只是丢了 taskId
 
 ### 5. 轮询遵守建议间隔
 
-用 `dj.mjs task <id> --watch`，它已经按服务端 `meta.pollAfterMs`（建议 3 秒）配了退避，
+用 `dj.mjs task <taskId> --watch`（taskId 取提交响应的 `data.taskId`，**不是** requestId），它已经按服务端 `meta.pollAfterMs`（建议 3 秒）配了退避，
 封顶 15 秒。**不要自己写 while 循环高频打**。视频任务是分钟级的，图片/音频十几秒到两分钟。
 
 `--watch` 默认等 **1800 秒（30 分钟）** 后放弃并退出码 6——那是「还在跑」不是失败，
-再 `dj.mjs task <id>` 查一次即可；长视频可以 `--timeout 3600` 加大。
+再 `dj.mjs task <taskId>` 查一次即可；长视频可以 `--timeout 3600` 加大。
 
 多条任务并行等待时，让它们各自 `--watch` 到终态，不要每秒扫一遍全部任务。
 
@@ -305,7 +305,7 @@ API 一概看不见。
 `meta.credits` 与 `meta.creditRef`，收尾汇报时都算进总账（纪律 6）。
 
 **视觉端点的素材一律先上传换 assetId**：不收 dataURL、不收 URL、不收本地路径。
-单张上限约 1.4MB 且**服务端不降采样**，超了直接 413——自己先压到长边 1024 量级。
+单张超过约 1.4MB 时服务端会自动缩到长边 1024 再送去识别（自家生成的大图直接传 assetId 即可）。
 视频反推的多帧也要你自己抽好、逐张 `dj.mjs upload`、按时序传进去（服务端不抽帧）。
 
 质检结果里 **`checks` 没有的维度 = 缺基准「没判」，不等于通过**；
@@ -370,6 +370,7 @@ dj edit-session status "$SID" --pretty
 - **③ 才拆分镜**（`dj storyboard`，整集一次拆完），把上一步落卡的名字作 `--cast` /
   `--scenes` 传回去——让镜头里的人名与画布上的卡逐字对齐；把每个角色的 `shotInjection`
   映射成 `[{name, anchor}]` 用 `--anchors` 传入，否则模型每个镜头都在重新想象这个角色长什么样。
+  `anchor` 每条 ≤60 字、只写硬特征——别拿 `look`（完整外貌描述）充数，超长直接 400。
 - **④ 落分镜视频卡，只能用 `createStoryboard kind:"video"`**：**优先用
   `dj storyboard-fall <canvasId> -f <storyboard响应.json>`**——按场次切批、空场景名兜底、
   一场超 30 段自动拆批全在命令里，自己拼批次写错的表现是静默断链。它等价于：每场一批，params 带
@@ -409,8 +410,8 @@ dj edit-session status "$SID" --pretty
   并在回执 `meta.resolvedReferences` 里回显每一张的来源（`assetId` / `sourceNodeId` / `via` /
   `label`）。**回显要逐条核对**：与你预期的设定板对不上，说明画布连线不是你以为的样子，
   先去改边再生成。没有任何参考连线的视频卡**不要生成**（解析为空时服务端照常报「缺参考」）。
-  **自动解析的只有参考，提示词不会从卡上读**：`--node` 只决定落到哪张卡，`params.prompt`
-  仍须自己传（下面「视频提示词」一条说怎么读回），漏传 `dj generate` 会直接报错。
+  **提示词也会从卡上读**：带 `--node` 且没给 `params.prompt` 时，服务端用卡上的 `prompt`
+  （与网页点「生成」同源），回执 `meta.promptSource` 会写明来源卡；卡上为空才报「缺少 params.prompt」。
   errors 归零后才轮到报价——这是第二次报价（纪律 1）。
   **`<Picture i>` 的编号不要猜**：`dj canvas lint` 的响应里就有 `references` 预演，
   每张视频卡逐条给出 `index` / `tag` / `label`，顺序与真正提交时**逐位一致**——
@@ -433,7 +434,8 @@ dj edit-session status "$SID" --pretty
   ```sh
   # 建板拿到 nodeId 后，读回卡上编译好的提示词（在 data.body，全文不截断）
   BOARD=$(dj node "$CANVAS" "$NODE_ID" | jq -r '.data.body')
-  dj precheck -f - <<< "{\"items\":[{\"capability\":\"t2i\",\"params\":{\"prompt\":$(jq -Rs . <<< "$BOARD")}}]}"
+  # $MODEL = 图片默认模型 id（取法见下文「默认模型」）；报价只看 size，不必带提示词
+  dj precheck -f - <<< "{\"items\":[{\"model\":\"$MODEL\",\"capability\":\"t2i\",\"params\":{\"size\":\"1k\"}}]}"
   # 用户确认后再 generate，prompt 同样用 $BOARD
   ```
 
@@ -442,9 +444,9 @@ dj edit-session status "$SID" --pretty
   同理，场景全景与道具板落卡时也各自编译过，都用 `dj node` 读回再提交。
 - **视频提示词就是分镜视频卡上的 `prompt`**（`createStoryboard kind:"video"` 落卡时来自
   `analyze/storyboard` 的 `segments[].videoPrompt`）：生成前 `dj node` 读回原样提交，
-  不要自己按 `shots` 拼、也不要只在请求里临时改写。**带了 `--node` 也要显式放进 `params.prompt`**——
-  服务端和 `dj` 都不会替你读卡（`PROMPT=$(dj node "$CANVAS" "$NODE" | jq -r '.data.body')`，
-  再 `--params-json "{\"prompt\":$(jq -Rs . <<< "$PROMPT"),\"durationSec\":8}"`）。平台编译过的版本里，多镜段带硬切
+  不要自己按 `shots` 拼、也不要只在请求里临时改写。带 `--canvas`/`--node` 且不给 `params.prompt` 时，
+  服务端直接用卡上的提示词（回执 `meta.promptSource` 写明来源）；要改写就先 `updateCard` 改卡，
+  别只在请求里临时换一段。平台编译过的版本里，多镜段带硬切
   指令与镜头时长，对白在「音轨：」行内一字不丢；自拼最常见的后果就是整片没有对白。
 - **提交前逐条核三件事**：① 提示词里出现的角色/场景名与画布上卡的名字逐字一致
   （差一个空格就连不上）；② 这一镜声明的角色、场景、道具都已经连上参考图；
@@ -557,7 +559,8 @@ dj edit-session status "$SID" --pretty
   收窄回 `low`——既不会更好看，也不改变计价，纯属误导用户。
 - **赠送积分不覆盖本模型**：只能由充值积分承担。用户只有赠送积分时 `precheck` 会
   `ok=false`（`available` 小于 `total`）或提交回 402 `insufficient_credits`，按下面「跑不动」处置。
-- 参考图最多 **6 张**（顶层 `referenceAssetIds`），超出的会被丢弃。局部重绘的蒙版规则不变
+- `t2i` 的参考图最多 **6 张**（顶层 `referenceAssetIds`），超出的会被丢弃。
+  `i2i` **不读** `referenceAssetIds`：要编辑的源图放 `params.image`。局部重绘的蒙版规则不变
   （`mask` 只有 `t2i` 消费，见下文；模型不吃蒙版会回 422 `mask_unsupported`）。
 - **失败信息说「上游服务内部故障」时**：改提示词、换参考图都没用，提交失败的这一笔也不扣钱
   （冻结已退回）。最多原样再试一次，仍失败就如实告诉用户并按下面「跑不动」处置。

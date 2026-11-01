@@ -49,7 +49,7 @@
 
 | 看什么 | 对不上会怎样 |
 |---|---|
-| 时长区间（如 H3 5-15s、Seedance 2.0 4-15s） | `durationSec` 越界被**静默夹取**，不报错 |
+| 时长区间（如 H3 5-15s、Seedance 2.0 4-15s） | `durationSec` 超过 15 直接 400；1–15 内但不在模型区间的会被夹取到区间内 |
 | 分辨率档（H3 只有 480p/720p，Seedance 标准版到 4k） | 不在档内的 `resolution` 回退默认档 |
 | 参考视频 / 参考音频上限为 0 | 带了对应素材直接 400 `model_unsupported` |
 
@@ -129,8 +129,8 @@ dj canvas lint "$CANVAS" | jq '.data.references[] | select(.nodeId=="'"$SHOT"'")
 
 `ref2v` / `i2v` / `flf2v` 三个粒度**带 `--canvas` + `--node` 提交时服务端会自动补【限制】段**（见下），
 那种情况一般不用自己写这一段；不定向落卡（没有 canvas/node）就得自己写。
-注意自动补的只是这几段，**提示词本身必须由你放进 `params.prompt`**：服务端不读卡上的提示词，
-空提示词 `dj generate` 会直接报错（分镜视频卡用 `dj node` 读回 `.data.body` 再提交）。
+提示词本身：没给 `params.prompt` 时服务端用目标卡上的 `prompt`（回执 `meta.promptSource` 写明来源）；
+不定向落卡、或卡上也是空的，就会 400「缺少 params.prompt」。
 
 ### 四、服务端会替你补什么（2.10.0 起）
 
