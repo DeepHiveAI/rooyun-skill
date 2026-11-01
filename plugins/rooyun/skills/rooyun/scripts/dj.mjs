@@ -48,7 +48,7 @@ const DEFAULT_BASE = "https://www.rooyun.com";
  *
  * 它不是第二个真相源：生成脚本从 SKILL.md 派生写入，两处不一致时构建就红。
  */
-const EMBEDDED_SKILL_VERSION = "1.48.0";
+const EMBEDDED_SKILL_VERSION = "1.49.0";
 
 /**
  * 单次 HTTP 请求的**空闲**超时（毫秒）：两次收到字节之间允许的最大间隔，
@@ -2568,6 +2568,24 @@ async function cmdPrecheck(ctx, { flags }) {
   handle(ctx, await request(ctx, "POST", "/generations/precheck", body), pretty.precheck);
 }
 
+/** 必须带提示词的视频粒度（数字人 avatar 由音频/动作驱动，不在此列） */
+const PROMPT_REQUIRED_VIDEO_GRAINS = new Set(["i2v", "flf2v", "ref2v"]);
+
+/**
+ * 视频粒度缺 `params.prompt` 就地拦下：带 `--canvas` + `--node` **不会**读卡上的提示词，
+ * 漏传时上游线路直接拒单（2026-11-01 有调用方因此每 5 分钟撞一次失败）。
+ */
+function assertVideoPrompt(body) {
+  if (!PROMPT_REQUIRED_VIDEO_GRAINS.has(body.capability)) return;
+  const prompt = body.params?.prompt;
+  if (typeof prompt === "string" && prompt.trim()) return;
+  fail(
+    `${body.capability} 缺少 params.prompt。带 --canvas/--node 只决定落到哪张卡、按画布解析参考，` +
+      "不会读卡上的提示词——先 `dj node <canvasId> <nodeId> | jq -r '.data.body'` 读回分镜视频卡的提示词，" +
+      "再放进 --params-json 的 prompt 原样提交。",
+  );
+}
+
 async function cmdGenerate(ctx, { flags }) {
   let body;
   if (typeof flags.model === "string") {
@@ -2606,6 +2624,8 @@ async function cmdGenerate(ctx, { flags }) {
     body = { ...input };
     if (typeof flags["request-id"] === "string") body.requestId = flags["request-id"];
   }
+
+  assertVideoPrompt(body);
 
   // 幂等键客户端强制：故意不自动生成——重试必须复用同一个键，
   // 由调用方生成并**存下来**才是正确姿势（用 `dj.mjs uuid` 现取一个）。

@@ -1,7 +1,7 @@
 ---
 name: rooyun-cli
-version: 1.48.0
-releasedAt: 2026-10-30
+version: 1.49.0
+releasedAt: 2026-11-01
 description: RooYun 精简版（CLI 自由模式）：只告诉你终端里的 dj.mjs 能调哪些能力、各产出什么——文生图、图生图/编辑、图生视频、首尾帧、参考图生视频、数字人口播、配音、音乐、音效、视频高清、视频转白模、上传素材、下载产物，以及可选的画布读写和平台 LLM 辅助（提示词优化、参考图/参考片反推提示词、剧本拆解）。不预设创作流程：提示词怎么写、先做什么后做什么、用哪个模型、要不要画布，全由用户决定。当用户说「用 RooYun 生成一张图 / 一段视频」「我自己写提示词」「别走固定流程」「直接调 RooYun 的工具」「rooyun-cli」，或提到 RooYun、ROOYUN_API_TOKEN 且想自己掌控创作时使用。生成会花用户的真钱，任何生成前先报价并等用户确认。
 ---
 
@@ -149,7 +149,8 @@ node "$SKILL/scripts/download.mjs" --asset <assetId> --out ./out --pretty
 
 **平台什么时候会动提示词**：只有带 `--canvas` + `--node` 提交视频时，平台会按画布上下文**追加**
 （只追加、不改写）参考声明 / 台词 / 【限制】，回执 `meta.promptCompile.applied` 如实列出补了什么。
-用户要逐字可控就在 `params` 里加 `"promptCompile":"off"`。个别模型（如 MiniMax H3）提交时会把
+用户要逐字可控就在 `params` 里加 `"promptCompile":"off"`。追加的前提是你传了 `params.prompt`：
+平台**不会**读卡上的提示词，`i2v` / `flf2v` / `ref2v` 漏传时 `dj generate` 直接报错。个别模型（如 MiniMax H3）提交时会把
 `<Picture i>` 这类标签翻成模型自己的语法——那是格式适配，不改内容。
 
 ## 默认模型（用户没点名时的建议，用户点名就听用户的）
