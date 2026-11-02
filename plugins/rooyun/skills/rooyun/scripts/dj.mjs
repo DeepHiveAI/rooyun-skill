@@ -51,7 +51,7 @@ const DEFAULT_BASE = "https://www.rooyun.com";
  *
  * 它不是第二个真相源：生成脚本从 SKILL.md 派生写入，两处不一致时构建就红。
  */
-const EMBEDDED_SKILL_VERSION = "1.52.0";
+const EMBEDDED_SKILL_VERSION = "1.53.0";
 
 /**
  * 单次 HTTP 请求的**空闲**超时（毫秒）：两次收到字节之间允许的最大间隔，
@@ -781,6 +781,8 @@ function hintFor(status, code, meta, error) {
       return "资产没同步到云端（不是 id 错了）：请用户在原设备打开画布让它上传，或直接导出。";
     case "model_unsupported":
       return "模型不存在/不支持该能力：用 `dj.mjs models --capability <cap>` 重新选。带 params.mask 时还要求该模型支持局部重绘（吃参考图），不行就换一个图片模型；capability=avatar 只有数字人模型能干（它们也不出 i2v/flf2v）。";
+    case "image_aspect_unsupported":
+      return "图片宽高比超出模型限制（Seedance 系横竖都不超过 2.5:1）：详情里写着是第几张、实际尺寸。把这张图裁剪或补边到范围内、重新上传，用新 assetId 再提交——改提示词或换同系模型都没用。本次未建任务、未扣费。";
     case "mask_unsupported":
       return "该模型所在渠道承载不了局部重绘蒙版（只有 OpenAI 兼容渠道有蒙版字段，其余图片渠道都没有）。换一个图片模型重试即可——素材本身没问题，别去查蒙版。";
     case "asset_unresolved":
