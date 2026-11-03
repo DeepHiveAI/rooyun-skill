@@ -51,7 +51,7 @@ const DEFAULT_BASE = "https://www.rooyun.com";
  *
  * 它不是第二个真相源：生成脚本从 SKILL.md 派生写入，两处不一致时构建就红。
  */
-const EMBEDDED_SKILL_VERSION = "1.56.0";
+const EMBEDDED_SKILL_VERSION = "1.57.0";
 
 /**
  * 单次 HTTP 请求的**空闲**超时（毫秒）：两次收到字节之间允许的最大间隔，
@@ -2322,6 +2322,16 @@ async function cmdStoryboard(ctx, { flags }) {
     if (segmentMaxSec !== undefined && !Number.isInteger(segmentMaxSec)) {
       fail("--segment-max-sec 须为整数（秒，2-15）");
     }
+    // 建议段时长下限（秒，1-15）：低于所选视频模型的最短时长会被按下限计费（如 Seedance 最短 4 秒）
+    const segmentMinSec =
+      typeof flags["segment-min-sec"] === "string"
+        ? Number(flags["segment-min-sec"])
+        : undefined;
+    if (segmentMinSec !== undefined && !Number.isInteger(segmentMinSec)) {
+      fail("--segment-min-sec 须为整数（秒，1-15）");
+    }
+    // 出片用的视频模型：服务端按它声明的时长区间补齐上下限（显式 --segment-*-sec 优先）
+    const videoModelId = typeof flags["video-model"] === "string" ? flags["video-model"] : undefined;
     body = {
       content,
       ...(castNames ? { castNames } : {}),
@@ -2329,6 +2339,8 @@ async function cmdStoryboard(ctx, { flags }) {
       ...(bible ? { bible } : {}),
       ...(appearanceAnchors?.length ? { appearanceAnchors } : {}),
       ...(segmentMaxSec !== undefined ? { segmentMaxSec } : {}),
+      ...(segmentMinSec !== undefined ? { segmentMinSec } : {}),
+      ...(videoModelId ? { videoModelId } : {}),
       ...modelOverride(flags),
     };
   }
@@ -2744,7 +2756,12 @@ async function cmdCanvas(ctx, { positional, flags }) {
     if (typeof canvasId !== "string") fail("canvas lint 需要 canvasId");
     const data = handle(
       ctx,
-      await request(ctx, "GET", `/canvases/${encodeURIComponent(canvasId)}/lint`),
+      // --include-generated：已出片的卡也体检（返工复查用；默认只查待生成的卡）
+      await request(
+        ctx,
+        "GET",
+        `/canvases/${encodeURIComponent(canvasId)}/lint${qs({ includeGenerated: flags["include-generated"] ? "1" : undefined })}`,
+      ),
       pretty.lint,
     );
     // 有 error 级 finding 就退 2（与 API 业务错误同码）：`dj canvas lint "$C" || exit 1`
@@ -3967,9 +3984,14 @@ const HELP = `dj.mjs · RooYun 开放 API v1 客户端（零依赖，Node ≥ 18
   canvas structure <canvasId>           读回结构（拿 nodeId/assetIds；version 仅条件写时才用）
                    [--full]             每张卡附带全文 + 全部可写参数（整张画布一次读全；
                                         大画布响应会很大，只要拓扑时别带）
-  canvas lint <canvasId>                画布体检（纪律 10 的门禁；只读、不扣积分）：
+  canvas lint <canvasId> [--include-generated]
+                                        画布体检（纪律 10 的门禁；只读、不扣积分）：
                                         视频卡缺参考 / 被引用的设定板还没出图 / 空引用坞连了下游 /
-                                        提示词点了设定板的名字却没连它（改过 prompt 后最容易撞上）。
+                                        提示词点了设定板的名字却没连它（改过 prompt 后最容易撞上）；
+                                        warn 另查：画幅与同组不一致 / 有对白且角色已定嗓须走 ref2v /
+                                        本场有同名场景板却没进参考 / 参考里混入 cast 外角色 /
+                                        时长低于模型下限（会按下限计费）。
+                                        默认跳过已出片的卡；--include-generated 连它们一起查（返工复查用）。
                                         **有 error 就别提交生成**——修完重跑，errors 归零再报价。
                                         有 error 时退出码 2，可直接写进脚本卡流水线。
                                         末尾还打印**参考预演**：每张待出片视频卡的
@@ -3993,7 +4015,8 @@ const HELP = `dj.mjs · RooYun 开放 API v1 客户端（零依赖，Node ≥ 18
                                         改完用 ops 的 create*Board 写进画布
   storyboard --script <剧本文件> [--cast 名字,…] [--scenes 地点,…]
              [--anchors <anchors.json>] [--bible <圣经文件>]
-             [--segment-max-sec <2-15>] [--model <id>] | [-f body.json]
+             [--segment-max-sec <2-15>] [--segment-min-sec <1-15>]
+             [--video-model <出片模型id>] [--model <id>] | [-f body.json]
                                         剧本 → 结构化分镜（场景→镜头两级）。同样不落卡。
                                         --anchors：extract characters 的 shotInjection 映射成
                                         [{name,anchor}]（不传则每镜重新想象角色长相）。

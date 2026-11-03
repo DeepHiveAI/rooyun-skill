@@ -17,7 +17,12 @@
 ### 五步全流程（每一步都可自动化，照抄即可）
 
 ```sh
-# ① 试镜：ref2v 出一条该角色的单人片段（不带参考音频！）
+# ⓪ 建试镜卡：createCard 带 auditionOf（官方试镜卡——标题缺省「试镜·<角色名>」、
+#    同名角色设定板自动连成参考、不再弹「请用 createStoryboard」提示）
+printf '%s' '[{"op":"createCard","params":{"kind":"video","auditionOf":"林小满"}}]' \
+   | dj ops $CANVAS | jq -r '.data.createdNodeIds[0]'      # → $AUDITION_NODE
+
+# ① 试镜：ref2v 出一条该角色的单人片段（不带参考音频！——还没定嗓，没有可注入的样本）
 #    提示词四要素：单人近景 + 环境安静无BGM + 一句剧本台词（带情绪指令）+ 详细音色描述。
 #    音色描述从角色小传/形象推导（年龄/性别/音质/气质/语速），这段就是「导演要的嗓子」：
 dj uuid   # → $REQ1
@@ -42,12 +47,20 @@ dj task <taskId> --watch      # → 产物音频 assetId = $VOICE_SAMPLE
 # ④ 绑定到角色名（角色名先 GET 抄 knownCharacters，逐字一致，别手拼）
 dj character-voices $CANVAS --pretty          # 看谁还没定嗓 + 抄准角色名
 dj character-voices $CANVAS --bind "林小满" --sample $VOICE_SAMPLE --label "试镜样本"
+#    样本须是 wav / mp3、单段 2–15 秒，否则绑定直接 400（它日后要当参考音频用）
 
-# ⑤ 此后该角色**每一条**对白镜头：ref2v + --reference-audio + 提示词标签声明
+# ⑤ 此后该角色**每一条**对白镜头：ref2v + --canvas/--node 即可，**样本自动注入**——
+#    服务端按本镜参考里的角色设定板（直连或引用坞成员）查④的绑定，把样本填进
+#    referenceAudioAssetIds，并在提示词末尾补【角色配音】段（<Audio N> 声明 + 缓解条款）。
+#    ⚠️ 必须走 ref2v（i2v 不吃参考音频）；`dj canvas lint` 的 voice_requires_ref2v 会提醒。
 dj generate --request-id <新uuid> --model <ref2v模型id> --capability ref2v \
-   --reference $CHAR_PORTRAIT_ASSET --reference-audio $VOICE_SAMPLE \
-   --canvas $CANVAS --node $SHOT_NODE \
-   --params-json '{"prompt":"<Picture 1> 是主角林小满的定妆照，画面人物的相貌、服饰以 <Picture 1> 为准。<Audio 1> 是林小满的声音样本，音色、嗓音特征严格以 <Audio 1> 为准；语气、情绪、语速不受 <Audio 1> 约束，按台词情境自然表演。……（镜头描述与台词）","durationSec":6}'
+   --canvas $CANVAS --node $SHOT_NODE
+#    提交回执核对：meta.voiceSamples.injected = 注入了谁的哪个样本；skipped = 被跳过的及原因
+#    （超模型段数上限 / 单段不在 2–15 秒 / 合计超 15 秒 / 非 wav·mp3）；
+#    meta.promptCompile.applied 含 voiceCast = 配音段已补。injected 为空 = 这镜没锁上嗓，别提交下一镜。
+#
+#    手动挡（仍然有效）：自己传 --reference-audio 就一律以你的为准、不再自动注入；
+#    此时提示词里的 <Audio j> 声明由你写（见下方两条铁律），尤其关了编译（promptCompile:"off"）时。
 ```
 
 ### 注入提示词的两条铁律（不是风格建议，是模型输入约定）

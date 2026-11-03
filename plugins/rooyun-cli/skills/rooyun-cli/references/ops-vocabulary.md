@@ -104,12 +104,12 @@ ops 是增量操作，重放到最新文档不会覆盖别人的改动——这�
 
 | op | 参数 |
 |---|---|
-| `createCard` | **必填** `kind`(text/image/video/audio/scene) + `title` 1–200；`content` ≤200000 · `audioMode`(voice/sfx/music，仅 audio) · `aspectRatio` ≤16 字符（仅 image） · `panorama`（720° 全景，画幅锁 2:1，会让 `aspectRatio` 失效） · `position` |
+| `createCard` | **必填** `kind`(text/image/video/audio/scene) + `title` 1–200（带 `auditionOf` 的试镜卡可省）；`content` ≤200000 · `audioMode`(voice/sfx/music，仅 audio) · `aspectRatio` ≤16 字符（仅 image） · `panorama`（720° 全景，画幅锁 2:1，会让 `aspectRatio` 失效） · `position` · `auditionOf` 角色名（仅 video/image：官方试镜卡——缺省标题「试镜·<角色名>」、同名角色板自动连参考、不弹 createStoryboard 提示） |
 | `createCharacterBoard` | **必填** `name` 1–80 + `description` 1–4000；`age` ≤40 字符（是字符串，填「25 岁」而不是数字 25） · `identity` ≤120 字符 · `bio` ≤2000 字符 · `expressions` ≤6 项（每项 ≤40 字符） · `props` ≤20 项（每项 ≤120 字符） · `styleKeywords` ≤10 项（每项 ≤40 字符） · `position` |
 | `createSceneSet` | **必填** `name` 1–80 + `description` 1–4000；`position` |
 | `createPropBoard` | **必填** `name` 1–80 + `description` 1–4000；`material` ≤200 · `era` ≤80 · `wear` ≤200 · `usage` ≤200 · `exploded` · `scaleRef` ≤120 · `position` |
-| `createStoryboard` | **必填** `shots` 1–30（每项必填 `title` 1–200 + `prompt` 1–8000；可选 `durationSec`、`audio`（仅 video 落卡）、`cast` ≤12 项、`props` ≤12 项、`shotNoStart` / `shotCount`（正整数，配合 `scriptNodeId` 写 `shotOf`，原样传 `segments[]` 的 `shotNoStart` 与 `shotNoEnd−shotNoStart+1`））；`kind`（`image` 缺省 / `video`）· `scriptNodeId` 1–120（**仅 video**，这批分镜所属的剧本文本卡 id；给了才写站内同款 `shotOf` 溯源锚并用站内格式起组名，不给站内会判「本剧本没拆过分镜」而重复落卡）· `sceneName` 1–80 + `layout`（`flat` 缺省 / `grouped`，需同时给 `sceneName`）· `aspectRatio`（整批统一，**缺省即全站默认 16:9**） |
-| `connectCards` | **必填** `sourceId` + `targetId`（1–120 字符） |
+| `createStoryboard` | **必填** `shots` 1–30（每项必填 `title` 1–200 + `prompt` 1–8000；可选 `durationSec`、`audio`（仅 video 落卡）、`cast` ≤12 项（**给了就以它为准**：角色参考只连 cast 内的人，提示词里提到的 cast 外角色不再并入、回执 `noop` 告警；视频卡记 `data.cast` 供 lint 核对；传 `[]` = 本镜无人）、`props` ≤12 项、`shotNoStart` / `shotCount`（正整数，配合 `scriptNodeId` 写 `shotOf`，原样传 `segments[]` 的 `shotNoStart` 与 `shotNoEnd−shotNoStart+1`））；`kind`（`image` 缺省 / `video`；`video` 下 `sceneName` 与同名场景设定板精确匹配时自动纳入本场每张卡的参考）· `scriptNodeId` 1–120（**仅 video**，这批分镜所属的剧本文本卡 id；给了才写站内同款 `shotOf` 溯源锚并用站内格式起组名，不给站内会判「本剧本没拆过分镜」而重复落卡）· `sceneName` 1–80 + `layout`（`flat` 缺省 / `grouped`，需同时给 `sceneName`）· `aspectRatio`（整批统一，**缺省即全站默认 16:9**） |
+| `connectCards` | **必填** `sourceId` + `targetId`（1–120 字符）。目标是**引用坞**时等价于「加坞成员」，并给按成员连着该坞的视频卡补连线（不建普通边） |
 | `disconnectCards` | **必填** `sourceId` + `targetId`（1–120 字符）；`sourceHandle` ≤120（只断该端口的边） |
 | `updateCard` | **必填** `nodeId` + 至少一个补丁字段，**按卡型放行**，见下表 |
 | `attachAsset` | **必填** `nodeId` + `assetId`（1–120 字符）。资产须是**你自己的云端资产**，大类与卡型一一对应（image→image 卡 / video→video 卡 / audio→audio 卡）；目标卡必须是空卡 |
