@@ -1,7 +1,7 @@
 ---
 name: rooyun
-version: 1.53.0
-releasedAt: 2026-11-02
+version: 1.55.0
+releasedAt: 2026-11-03
 description: 用自然语言驱动 RooYun（短剧 AI 创作工作台）的开放 API：建项目与无限画布、按「剧本 → 角色/场景/道具 → 分镜视频卡 → 生成」的固定顺序搭画布、用平台 LLM 把剧本拆成结构化的角色/场景/道具/分镜再落成卡片、调模型生成图片视频音频并自动落回卡片、把一段现成视频转成白模再让新角色复刻它的动作与运镜、反推参考素材的提示词、质检分镜图、下载产物到本地、把抖音视频分享链接解析成可直接下载的视频直链，供本地看片做对标分析；以及选题情报一条链：读每日频道简报（选题 + 「AI 数字人做不做得了」的可执行性判断 + 对标参考）、订阅对标博主并按增速看谁在起来、查热榜与每日选题报告、检索文案库看别人的爆款是怎么写的（钩子/段落节奏/CTA）。当用户说「用 RooYun 生成分镜 / 把我的剧本做成视频工程 / 拆一下这个剧本的角色 / 在 RooYun 里建个项目 / 把这段视频换成我的角色重演 / 下载我 RooYun 项目的产物 / 查我 RooYun 还剩多少积分 / 帮我把这条抖音视频下下来看看 / 抓一下这个抖音博主的视频 / 今天做什么选题 / 帮我盯着这几个对标博主 / 别人这条爆款是怎么写的 / 看看今天的选题简报」，或提到 RooYun、rooyun.com、ROOYUN_API_TOKEN 时使用本技能。生成类会花用户的真钱，任何生成前必须先报价并等用户确认；选题情报那条链全部只读、不扣积分。
 ---
 
@@ -40,6 +40,7 @@ RooYun 是「无限画布 + AI Agent」的短剧创作工作台。你通过 v1 �
 | 拆解对标博主 | 解析抖音分享链接 → 发起深度分析 → 读账号画像（赛道/受众/叙事骨架/风格雷达/标题公式）与**可直接仿写的提示词**、逐条视频报告与 ASR 转写全文；需要原片还能转存进资产库 |
 | **拿抖音视频到本地** | 粘一条抖音**单条视频**链接 → 拿到视频直链 → `curl` 下到本地自己看片/分析（不转存、不花钱。主页链接当前拿不到列表，见纪律 15） |
 | **拆解一条参考视频** | 粘一条抖音**单条视频**链接 → 平台切镜抽帧 + 转写 → 出逐镜头的「分段实现账」：每镜的叙事功能（hook/setup/escalate/turn/proof/cta/close）、对观众做了什么、复刻时哪些维度能换/必保、画面具体做了什么。这是「看懂一条爆款并拆成可执行方案」的第一步，约 5–15 分钟异步；**扣积分：0.1 积分/秒 × 源视频时长**（后续改编不另收费，失败自动退款），发起前先报价。拿到账本后用 `dj reference-frames <jobId> --shots …` **在本机抽帧亲眼复核**（账本的 `visual` 是模型说的，帧预算覆盖不到所有镜头）（见「参考视频拆解」章，[`references/reference-video.md`](references/reference-video.md)） |
+| **爆款复刻 → 剪映草稿** | 粘一条抖音单条视频 → `dj video-analyze` 出站内「爆款复刻」同款蓝图（★收费，先 `--quote` 报价）→ `dj recreate` 一次落成整套卡（免费、不生成）→ 报价确认后出片 → `download.mjs --jianying` 导出剪映草稿（见「复刻 → 出片 → 导出剪映」章） |
 | **复刻验收** | 片子做完别只凭感觉说「像」：把自己的成片按同一套管线拆一遍（`dj reference-analyze --asset <assetId>`），再 `dj reference-compare <参考片jobId> <成片jobId>` 出结构 diff——**参考片有、成片一次都没出现的功能**（丢了 proof 就是漏了证据环节）、必保维度有没有保住。纯计算不花钱；判定只是提示**不是门禁**（只比叙事结构，不比观感画质），成片仍要你亲自看完 |
 | **赛道结构模板** | 拆过 2–12 条同赛道的片子后，`dj reference-template <jobId> …` 归纳共性：骨架序列、每个环节的出现率（`cta 0.67` = 三条里一条不带 CTA）、功能组成占比、各维度「换掉就垮」的共识。纯计算不花钱 |
 | **改编参考视频** | 拿上面那份账本，`dj reference-adapt <jobId> --presenter "…" --product "…"` → **同一套叙事结构、不同内容**的新段落清单：服务端逐段按该段的「可换/必保」判定决定改不改，命中「必保」的不改并如实标出。`function`/`intent`/段数全部保留，只有台词与画面要求是新的；`--script-md` 直接出可粘进剧本卡的分段文案 |
@@ -714,6 +715,55 @@ node $SKILL/scripts/download.mjs --project <projectId> --out ./out --pretty
 
 `createStoryboard` 返回的 `nodeIds` **与 `shots` 数组一一对应、顺序一致**——
 `nodeIds[0]` 就是 `shots[0]` 那张卡。重复连同一条边会返回 `noop`，无害。
+
+---
+
+## 复刻 → 出片 → 导出剪映（照着一条爆款做一条自己的）
+
+和「参考视频拆解」是**两条链**：那条出叙事段落账本（每段作用 + 可换/必保），用来**改编**；
+这条出站内「爆款复刻」同款的**复刻蓝图**（角色 / 场景 / 逐镜画面与台词 / 说话人 / 配乐），
+一次落成整套卡、出片后导出剪映草稿。用户说「照着这条做一条一样的」「复刻这条」时走这条。
+MCP 接入同样可走这条链：`analyze_video_for_recreation` → `land_recreation` → `export_jianying_draft`，
+素材逐个 `get_asset_download_url` 取件。
+
+**各步所需 scope**：分析与续查（`video-analyze` / `video-analysis`）要 `creators:read`；落卡（`recreate`）要
+`canvas:write`；出片要 `generate`；导出剪映要 `projects:read` + `assets:read`。`dj login` 签的令牌自带全部 scope；
+用户在网页端手工建的令牌可能没勾 `creators:read`——先 `dj.mjs me` 核对，缺了就停下来让用户补。
+
+```sh
+# 1) 分析（★收费）：先报价，把「X 积分 / 余额 Y」告诉用户，等一个明确的「继续」
+dj video-analyze "<抖音单条视频链接>" --quote --pretty
+dj video-analyze "<抖音单条视频链接>" --out ./recreation.json --pretty   # 确认后正式提交，默认等到终态
+#    命中平台缓存 = 0 积分立即出结果；失败 / 演示产物（mock）整笔退回、不能用来落卡
+#    中断了：dj video-analysis <analysisId> 续查（免费）
+#    MCP：analyze_video_for_recreation（先 dryRun:true 报价；续查只传 analysisId）
+
+# 2) 落卡（免费、不生成）：拆解卡 + 拉片 + 配乐 + 口播稿 + 角色板 + 场景 + 分镜图 + 分镜视频卡 + 配音卡，各区成组
+dj recreate <canvasId> --analysis <analysisId> --pretty
+#    要选区（只落部分）、换角（characterIndex → 你的角色图 assetId）、改目标时长 / 画幅 / 台词：
+#    用 --file 传整份请求体（字段见 OpenAPI landRecreation；swaps 的图必须是本账号资产库里的图片）
+#    回执的 unboundVoiceShots 非空 = 这些镜头的说话人还没定嗓：先 dj character-voices 绑好再生成配音
+#    MCP：land_recreation（请求体字段同 --file，外加 canvasId）
+
+# 3) 出片（★收费）：卡上只有预填提示词——按纪律 1 先对整组 precheck 报**总价**、等确认，再逐张 generate
+#    顺序：角色板 / 场景 → 分镜图 → 分镜视频卡 → 配音 / 配乐；每张卡的提示词照纪律 11 复查后自己传
+#    分镜图除了回执的 nodes.storyboards，还有 nodes.stills（快切镜第 2 张起的图，按镜头下标对齐；没有快切镜时不带）
+#    也要逐张生成、一并计入报价；快切镜已出图不足 2 张时，导出剪映会整镜跳过
+
+# 4) 导出剪映草稿（免费）：把分镜组里已出片的视频 / 配音 / 配乐排进剪映时间线
+node "$SKILL/scripts/download.mjs" --jianying <canvasId> --group <分镜组groupId> --out ./draft --pretty
+#    MCP：export_jianying_draft（回草稿 files[] + 素材 media[]；按 path / zipPath 落盘，素材逐个 get_asset_download_url）
+#    令牌要有 projects:read + assets:read（取素材走下载口，计入下载日配额）。groupId 就是第 2 步回执的 groupId。status=nothing / empty = 组里还没有可导出的产物，先回第 3 步
+#    导入：把回执 notes 点名的草稿文件夹（整个文件夹，不是里面的文件）放进剪映草稿目录
+#    （macOS：~/Movies/JianyingPro/User Data/Projects/com.lveditor.draft/），完全退出并重开剪映；
+#    步骤见文件夹旁的《导入说明.txt》。**任一素材下载失败都别导入**（剪映里会素材离线），重跑本命令续传
+```
+
+- **只有两处花钱**：第 1 步分析、第 3 步生成；两处都先报价再等确认。落卡与导出不扣积分。
+- 开放 API 的蓝图比站内少两步补强：逐镜看帧精修、原曲实测拍网格。落卡按目标时长缩放镜头时长，
+  卡点不如站内准——用户在意节奏时，告诉他可以在网页端对拆解卡再点一次「按此复刻」。
+- 剪映**能做的**（字幕样式、转场、调色、音量淡入淡出）一律交给剪映，别用 ops 去模拟。
+- 导出只收已同步到云端的产物；只在用户本机浏览器里的素材会被跳过并计数，如实转告。
 
 ---
 

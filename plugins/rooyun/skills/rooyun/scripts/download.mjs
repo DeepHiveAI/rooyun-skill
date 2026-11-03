@@ -4,10 +4,13 @@
  *
  * 零依赖（只用 Node 内置模块），Node ≥ 18。
  *
- * 三条取件路线：
+ * 四条取件路线：
  *   --project <projectId>   该项目**引用**的资产（附服务端完整性块：引用 / 云端可取 / 缺失）
  *   --all                   账号下**全部**云端资产（兜底找回：画布删了、卡删了，东西还在）
  *   --asset <id> / --ids …  指定 assetId 清单
+ *   --jianying <canvasId> --group <groupId>
+ *                           剪映草稿：服务端只回草稿 JSON + 素材 assetId 清单（不回签名地址），
+ *                           素材照样经 /v1/assets/{id}/download 逐件取、sha256 校验
  *
  * 两条纪律落到代码里：
  * ① **签名地址不落日志**：`/v1/assets/{id}/download` 返回 302，本脚本手动跟随，
@@ -95,6 +98,9 @@ const HELP = `download.mjs · RooYun 开放 API v1 批量下载（零依赖，No
   download.mjs --project <projectId> [--out ./out]
   download.mjs --all [--out ./out]
   download.mjs --asset <assetId> [--asset <assetId> …] [--ids a,b,c] [--ids-file ids.json]
+  download.mjs --jianying <canvasId> --group <分镜组nodeId> [--out ./out]
+               ↳ 导出剪映草稿：服务端排好时间轴，本脚本落草稿 JSON 并逐件下载素材到草稿文件夹
+                 （需 projects:read + assets:read；不扣积分，素材下载计入下载日配额）
 
 环境变量：
   ROOYUN_API_TOKEN   个人访问令牌（需 assets:read）。可选：没设就用 dj.mjs login 保存的本机凭据。永不打印。
@@ -122,6 +128,38 @@ const HELP = `download.mjs · RooYun 开放 API v1 批量下载（零依赖，No
 // ---------------------------------------------------------------------------
 // API
 // ---------------------------------------------------------------------------
+
+/** 打一个返回信封的 POST（JSON 体）；非 2xx 直接终止，语义同 apiGet */
+async function apiPost(ctx, pathname, body) {
+  const url = `${ctx.base}/api/v1${pathname}`;
+  let response;
+  try {
+    response = await fetch(url, {
+      method: "POST",
+      headers: {
+        authorization: `Bearer ${ctx.token}`,
+        accept: "application/json",
+        "content-type": "application/json",
+      },
+      body: JSON.stringify(body ?? {}),
+      redirect: "manual",
+    });
+  } catch (err) {
+    process.stderr.write(
+      `download: 请求失败 POST ${url}\n    ${err instanceof Error ? `${err.name}: ${err.message}` : "unknown"}\n`,
+    );
+    process.exit(EXIT.network);
+  }
+  const envelope = await response.json().catch(() => null);
+  if (!response.ok || !envelope?.ok) {
+    process.stdout.write(`${JSON.stringify(envelope)}\n`);
+    process.stderr.write(
+      `download: HTTP ${response.status} ${envelope?.error?.code ?? "?"} — ${envelope?.error?.message ?? ""}\n`,
+    );
+    process.exit(EXIT.apiError);
+  }
+  return envelope;
+}
 
 /**
  * 令牌：环境变量优先，其次 `dj.mjs login` 写下的本机凭据文件（~/.rooyun/credentials.json，按站点分桶）。
@@ -214,8 +252,22 @@ function isAssetId(value) {
 }
 
 function fileNameFor(entry) {
+  if (entry.relPath) return entry.relPath;
   const ext = EXT_BY_MIME[entry.mime] ?? "bin";
   return `${entry.assetId.slice(0, 16)}.${ext}`;
+}
+
+/**
+ * 剪映草稿路线的落盘相对路径闸：路径来自服务端响应，同样不可信（见 isAssetId 的说明）。
+ * 只收「正斜杠分段、无 . / .. 段、非绝对、无控制字符」的相对路径，且解析后必须仍在 root 内。
+ */
+const UNSAFE_SEGMENT_RE = /[\u0000-\u001f\\:*?"<>|]/;
+function safeRelPath(root, rel) {
+  if (typeof rel !== "string" || rel.length === 0 || rel.length > 400 || rel.startsWith("/")) return null;
+  const segments = rel.split("/");
+  if (segments.some((s) => s === "" || s === "." || s === ".." || UNSAFE_SEGMENT_RE.test(s))) return null;
+  const resolved = path.resolve(root, ...segments);
+  return resolved.startsWith(`${path.resolve(root)}${path.sep}`) ? segments.join(path.sep) : null;
 }
 
 /**
@@ -234,6 +286,8 @@ async function downloadOne(ctx, entry) {
   }
   const fileName = fileNameFor(entry);
   const target = path.join(ctx.outDir, fileName);
+  // 剪映草稿路线落在多级子目录（Resources/local/video/…）
+  if (entry.relPath) await mkdir(path.dirname(target), { recursive: true });
 
   if (!ctx.overwrite) {
     try {
@@ -489,6 +543,8 @@ async function main() {
   let source;
   let entries = [];
   let integrity = null;
+  /** 剪映草稿路线的服务端清单（其余路线为 null） */
+  let draft = null;
 
   if (typeof flags.project === "string") {
     source = { kind: "project", projectId: flags.project, ...(mime ? { mime } : {}) };
@@ -519,8 +575,40 @@ async function main() {
         unreadable_canvases: [],
       };
     }
+  } else if (typeof flags.jianying === "string") {
+    if (typeof flags.group !== "string") fail("--jianying <canvasId> 需要同时给 --group <分镜组 nodeId>");
+    source = { kind: "jianying", canvasId: flags.jianying, groupId: flags.group };
+    const envelope = await apiPost(
+      ctx,
+      `/canvases/${encodeURIComponent(flags.jianying)}/groups/${encodeURIComponent(flags.group)}/jianying-draft`,
+      {},
+    );
+    draft = envelope.data;
+    if (draft?.status !== "ok") {
+      // empty / nothing：请求没错，只是组里还没有能导出的东西（多半是还没生成）
+      const report = {
+        ok: false,
+        source,
+        draft: { status: draft?.status ?? "unknown", skippedShots: draft?.skippedShots ?? 0 },
+        notes: ["分镜组里还没有可导出的成片素材（视频或分镜图都没生成 / 没上云），先生成再导出。"],
+      };
+      process.stdout.write(`${JSON.stringify(report)}\n`);
+      process.exit(EXIT.partial);
+    }
+    await mkdir(outDir, { recursive: true });
+    for (const file of draft.files ?? []) {
+      const rel = safeRelPath(outDir, file?.path);
+      if (!rel || typeof file.text !== "string") fail(`服务端返回的草稿文件路径不合法，已中止：${String(file?.path)}`);
+      await mkdir(path.dirname(path.join(outDir, rel)), { recursive: true });
+      await writeFile(path.join(outDir, rel), file.text, "utf8");
+    }
+    entries = (draft.media ?? []).map((m) => {
+      const rel = safeRelPath(outDir, m?.zipPath);
+      if (!rel) fail(`服务端返回的素材路径不合法，已中止：${String(m?.zipPath)}`);
+      return { assetId: m.assetId, mime: m.mime, sizeBytes: m.bytes, relPath: rel };
+    });
   } else {
-    fail("需要一个取件源：--project <id> / --all / --asset <assetId>（用 --help 看全部）");
+    fail("需要一个取件源：--project <id> / --all / --asset <assetId> / --jianying <canvasId> --group <id>（用 --help 看全部）");
   }
 
   await mkdir(outDir, { recursive: true });
@@ -577,12 +665,32 @@ async function main() {
         `所以 referenced_total(${integrity?.referenced_total ?? "?"}) 大于本次列出的 ${entries.length} 件是正常的，不是缺失。`,
     );
   }
+  if (draft) {
+    notes.push(
+      `剪映草稿文件夹：${path.join(outDir, draft.folderName)}。把整个文件夹（不是里面的文件）放进剪映草稿目录后完全退出并重开剪映，` +
+        "步骤见同目录《导入说明.txt》；任何素材下载失败都不要导入（剪映里会素材离线），重跑本命令续传。",
+    );
+    if (draft.skippedShots > 0) notes.push(`有 ${draft.skippedShots} 镜没有可用画面（未生成或不在云端），草稿里跳过了它们。`);
+    if (draft.failedVoices > 0) notes.push(`有 ${draft.failedVoices} 条配音读不出时长或不在云端，草稿里跳过了它们。`);
+    if (draft.musicFailed) notes.push("配乐取不到，草稿里没有配乐轨。");
+  }
   if (summary.failed > 0) notes.push("有失败项，逐条原因见 files[].reason。");
 
   const report = {
     ok: summary.failed === 0 && !(integrity?.missing?.length > 0),
     outDir,
     source,
+    ...(draft
+      ? {
+          draft: {
+            folderName: draft.folderName,
+            stats: draft.stats,
+            skippedShots: draft.skippedShots,
+            failedVoices: draft.failedVoices,
+            hasPublishCopy: Boolean(draft.publishCopy),
+          },
+        }
+      : {}),
     integrity,
     summary,
     ...(quota.length ? { downloadQuotaRemainingBytes: Math.min(...quota) } : {}),

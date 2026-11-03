@@ -61,6 +61,10 @@
 | `reference-frames <jobId> (--shot\|--shots\|--range\|--around)` | 读一次 `GET /api/v1/reference-decompositions/{id}` + `POST /creators/resolve`，**抽帧在你本机跑**（ffmpeg） | `creators:read` |
 | `reference-adapt <jobId> --presenter … --product …` | `POST /api/v1/reference-decompositions/{id}/adaptations` | `generate`（不另收费，含在拆解价内） |
 | `reference-compare <参考片jobId> <成片jobId>` | `POST /api/v1/reference-decompositions/{id}/compare` | `creators:read`（纯计算不花钱） |
+| `video-analyze (<链接或口令或视频id> \| --asset <assetId>) [--quote] [--out report.json]` | `POST /api/v1/video-analyses`（`--quote` = `dryRun:true` 只报价；正式提交后默认等到终态） | `creators:read` ★扣积分（以报价为准，缓存命中免费，失败退款） |
+| `video-analysis <analysisId>` | `GET /api/v1/video-analyses/{id}` | `creators:read` |
+| `recreate <canvasId> (--analysis <id> \| --file body.json)` | `POST /api/v1/canvases/{id}/recreations`（蓝图一次落卡，不触发生成） | `canvas:write`（免费） |
+| `download.mjs --jianying <canvasId> --group <groupId>` | `POST /api/v1/canvases/{id}/groups/{groupId}/jianying-draft` + 逐个 `GET /api/v1/assets/{id}/download` | `projects:read` + 取件 `assets:read`（免费，素材计入下载日配额；导出每令牌 2 次/分钟） |
 | `reference-template <jobId> <jobId> …` | `POST /api/v1/reference-templates` | `creators:read`（纯计算不花钱） |
 | `creator <secUid>` | `GET /api/v1/creators/{secUid}` | `creators:read` |
 | `creator-report <secUid> <videoId>` | `GET /api/v1/creators/{secUid}/videos/{videoId}/report` | `creators:read` |

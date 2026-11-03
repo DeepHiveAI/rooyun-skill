@@ -51,7 +51,7 @@ const DEFAULT_BASE = "https://www.rooyun.com";
  *
  * 它不是第二个真相源：生成脚本从 SKILL.md 派生写入，两处不一致时构建就红。
  */
-const EMBEDDED_SKILL_VERSION = "1.53.0";
+const EMBEDDED_SKILL_VERSION = "1.55.0";
 
 /**
  * 单次 HTTP 请求的**空闲**超时（毫秒）：两次收到字节之间允许的最大间隔，
@@ -1224,6 +1224,54 @@ const pretty = {
     ]
       .filter(Boolean)
       .join("\n"),
+  videoAnalysisQuote: (d) =>
+    [
+      `报价  ${d.credits} 积分${d.cached ? "（命中平台缓存：提交免费、立即出结果）" : ""}`,
+      `余额  ${d.balance}`,
+      d.videoId ? `视频  ${d.videoId}` : "",
+      "",
+      "★ 把报价告诉用户、等确认后再去掉 --quote 正式提交",
+    ]
+      .filter(Boolean)
+      .join("\n"),
+  videoAnalysis: (d) => {
+    const shots = d.report?.recreation?.shots?.length ?? 0;
+    const roles = d.report?.recreation?.characters?.length ?? 0;
+    return [
+      `分析  ${d.analysisId}`,
+      `状态  ${d.status}${d.gpuStage ? `(${d.gpuStage})` : ""}${d.deduplicated ? "（命中幂等，复用既有任务）" : ""}${d.cached ? "（命中缓存）" : ""}`,
+      d.videoId ? `视频  ${d.videoId}${d.source?.title ? `  ${d.source.title}` : ""}` : d.assetId ? `资产  ${d.assetId}` : "",
+      typeof d.chargedCredits === "number" ? `扣费  ${d.chargedCredits} 积分` : "",
+      d.mock ? "⚠️ 演示产物（平台未配真实分析模型，已退款）：不能用来复刻" : "",
+      d.report ? `蓝图  ${roles} 个角色 · ${shots} 个镜头${d.report.recreation ? "" : "（未产出复刻蓝图）"}` : "",
+      d.failedStage ? `失败  ${d.failedStage}${d.failedCode ? `/${d.failedCode}` : ""}` : "",
+      d.error ? `说明  ${d.error}` : "",
+      d.status === "done" && d.report?.recreation && !d.mock
+        ? `\n下一步落卡（免费、不生成）：dj.mjs recreate <canvasId> --analysis ${d.analysisId}`
+        : d.status === "queued" || d.status === "running"
+          ? `\n查进度：dj.mjs video-analysis ${d.analysisId}`
+          : "",
+    ]
+      .filter(Boolean)
+      .join("\n");
+  },
+  recreation: (d) => {
+    const n = d.nodes ?? {};
+    const unbound = d.unboundVoiceShots ?? [];
+    return [
+      `画布  ${d.canvasId}  版本 ${d.version}`,
+      `落卡  ${d.cardCount} 张（拆解卡 ${d.analyzeNodeId}）`,
+      `分镜组  ${d.groupId ?? "（无）"}`,
+      `角色 ${n.characters?.length ?? 0} · 场景 ${n.scenes?.length ?? 0} · 分镜图 ${(n.storyboards ?? []).filter(Boolean).length} · 视频卡 ${n.shots?.length ?? 0} · 配音卡 ${n.voices?.length ?? 0}`,
+      n.music ? `配乐卡  ${n.music}` : "",
+      unbound.length > 0 ? `⚠️ ${unbound.length} 个镜头的说话人未定嗓：生成配音前先 character-voices 绑定` : "",
+      "",
+      "下一步：先对整组 precheck 报总价、等用户确认，再提交生成；出片后",
+      d.groupId ? `  node download.mjs --jianying ${d.canvasId} --group ${d.groupId}` : "",
+    ]
+      .filter(Boolean)
+      .join("\n");
+  },
   referenceCompare: (d) => {
     const c = d.comparison ?? {};
     const fs = c.functionSequence ?? {};
@@ -4063,6 +4111,13 @@ const HELP = `dj.mjs · RooYun 开放 API v1 客户端（零依赖，Node ≥ 18
   reference-analysis <jobId> [--out …] [--timeline-md …]   查一次拆解进度（不等）
   reference-compare <参考片jobId> <成片jobId>  复刻验收：结构 diff（纯计算，不花钱）
                                         成片先 reference-analyze --asset <assetId> 拆一遍
+  video-analyze (<链接|口令|视频id> | --asset <assetId>) [--quote] [--no-wait] [--timeout <秒>] [--request <幂等键>] [--out report.json]
+                                        单条视频 → 爆款复刻蓝图（站内「爆款复刻」同款报告）
+                                        ★收费：先 --quote 报价、等用户确认再正式提交；缓存命中免费
+  video-analysis <analysisId> [--out report.json]   查一次单视频分析（不等，免费）
+  recreate <canvasId> (--analysis <analysisId> [--duration <秒>] | --file body.json)
+                                        蓝图一次落卡（免费、不触发生成）；出片后用
+                                        download.mjs --jianying <canvasId> --group <groupId> 导出剪映草稿
   reference-template <jobId> <jobId> …     2–12 条拆解 → 赛道结构模板（纯计算，不花钱）
                                         骨架 + 每环节出现率 + 组成占比 + 必保共识
   reference-adapt <jobId> --presenter "…" --product "…" [--setting/--vertical/--language/--pacing/--dialogue/--shot-composition "…"]
@@ -4431,6 +4486,106 @@ async function cmdReferenceAnalyze(ctx, { positional, flags }) {
     `dj: 等待超时（${Math.round(timeoutMs / 1000)}s），拆解仍在进行——不是失败，稍后用 \`dj.mjs reference-analysis ${jobId}\` 再查。\n`,
   );
   process.exit(EXIT.watchTimeout);
+}
+
+/** 单视频分析落盘：`--out <file>` 写整份报告（含 recreation 蓝图），只在 done 且有报告时写 */
+function writeVideoAnalysisReport(flags, d) {
+  if (typeof flags.out !== "string" || !d?.report) return;
+  mkdirSync(pathDirname(flags.out), { recursive: true });
+  writeFileSync(flags.out, `${JSON.stringify({ analysisId: d.analysisId, source: d.source, report: d.report }, null, 2)}\n`, "utf8");
+  process.stderr.write(`dj: 报告已写入 ${flags.out}\n`);
+}
+
+/**
+ * `video-analyze (<链接|口令|视频id> | --asset <assetId>) [--quote]`：单条视频 → 复刻蓝图（收费）。
+ * `--quote` 只报价（dryRun，不扣费）；不带则正式提交并默认等到终态。
+ * 与 reference-analyze 不同：这条产出的是站内「爆款复刻」同款报告（report.recreation），可直接 recreate 落卡。
+ */
+async function cmdVideoAnalyze(ctx, { positional, flags }) {
+  // `--quote <链接>` 会被解析成 quote=链接：把它当输入，不让报价开关吞掉链接
+  const quotedInput = typeof flags.quote === "string" ? flags.quote : "";
+  const input = [...positional, quotedInput].join(" ").trim() || (typeof flags.input === "string" ? flags.input : "");
+  const assetId = typeof flags.asset === "string" ? flags.asset.trim() : "";
+  if (!input && !assetId) fail("video-analyze 需要一条抖音**单条视频**的分享链接、口令全文或视频 id；拆资产库视频用 --asset <assetId>");
+  if (input && assetId) fail("--asset 与视频链接二选一，不能同时给");
+  const target = assetId ? { assetId } : { input };
+  if (flags.quote) {
+    handle(ctx, await request(ctx, "POST", "/video-analyses", { ...target, dryRun: true }), pretty.videoAnalysisQuote);
+    return;
+  }
+  const requestId = typeof flags.request === "string" ? flags.request : randomUUID();
+  const submitted = await request(ctx, "POST", "/video-analyses", { ...target, requestId });
+  const data = submitted.envelope?.data;
+  // 失败 / --no-wait / 已终态（缓存命中直接出结果）都不必轮询
+  if (submitted.status < 200 || submitted.status >= 300 || !submitted.envelope?.ok || flags["no-wait"] || data?.status === "done" || data?.status === "failed") {
+    if (submitted.envelope?.ok) writeVideoAnalysisReport(flags, data);
+    handle(ctx, submitted, pretty.videoAnalysis);
+    return;
+  }
+  const analysisId = data?.analysisId;
+  if (typeof analysisId !== "string") {
+    process.stderr.write("dj: 提交响应里没有 analysisId，无法继续等待\n");
+    process.exit(EXIT.apiError);
+  }
+  process.stderr.write(`dj: 已提交 analysisId=${analysisId}（中断后可用 \`dj.mjs video-analysis ${analysisId}\` 续查）\n`);
+  const path = `/video-analyses/${encodeURIComponent(analysisId)}`;
+  const timeoutMs = intFlag(flags, "timeout", DEFAULT_ANALYZE_TIMEOUT_S) * 1000;
+  const deadline = Date.now() + timeoutMs;
+  let interval = ANALYZE_POLL_MS;
+  let last = null;
+  for (;;) {
+    const result = await request(ctx, "GET", path);
+    if (result.status === 429) {
+      interval = Math.min(interval * 2, ANALYZE_POLL_MAX_MS);
+      if (Date.now() + interval > deadline) break;
+      await sleep(interval);
+      continue;
+    }
+    if (result.status < 200 || result.status >= 300 || !result.envelope?.ok) {
+      handle(ctx, result, pretty.videoAnalysis);
+      return;
+    }
+    last = result;
+    const d = result.envelope.data;
+    if (d?.status === "done" || d?.status === "failed") {
+      writeVideoAnalysisReport(flags, d);
+      emit(ctx, result.envelope, pretty.videoAnalysis);
+      process.exit(d.status === "failed" ? EXIT.taskNotSucceeded : EXIT.ok);
+    }
+    if (ctx.pretty) process.stderr.write(`dj: ${d?.status}${d?.gpuStage ? `(${d.gpuStage})` : ""}，${interval}ms 后再查\n`);
+    if (Date.now() + interval > deadline) break;
+    await sleep(interval);
+  }
+  if (last) emit(ctx, last.envelope, pretty.videoAnalysis);
+  process.stderr.write(`dj: 等待超时（${Math.round(timeoutMs / 1000)}s），分析仍在进行——不是失败，稍后用 \`dj.mjs video-analysis ${analysisId}\` 再查。\n`);
+  process.exit(EXIT.watchTimeout);
+}
+
+/** `video-analysis <analysisId> [--out report.json]`：查一次单视频分析（不等，免费） */
+async function cmdVideoAnalysis(ctx, { positional, flags }) {
+  const analysisId = positional[0];
+  if (typeof analysisId !== "string") fail("video-analysis 需要 analysisId");
+  const result = await request(ctx, "GET", `/video-analyses/${encodeURIComponent(analysisId)}`);
+  if (result.status >= 200 && result.status < 300 && result.envelope?.ok) writeVideoAnalysisReport(flags, result.envelope.data);
+  handle(ctx, result, pretty.videoAnalysis);
+}
+
+/**
+ * `recreate <canvasId> (--analysis <id> | --file body.json)`：复刻蓝图一次落卡（免费、不触发生成）。
+ * --analysis 走最简请求；要选区 / 换角 / 改时长等完整选项时用 --file 传整份请求体（字段见 OpenAPI landRecreation）。
+ */
+async function cmdRecreate(ctx, { positional, flags }) {
+  const canvasId = positional[0];
+  if (typeof canvasId !== "string") fail("recreate 需要 canvasId");
+  const analysisId = typeof flags.analysis === "string" ? flags.analysis.trim() : "";
+  if (analysisId && typeof flags.file === "string") fail("--analysis 与 --file 二选一");
+  const body = analysisId
+    ? {
+        analysisId,
+        ...(typeof flags.duration === "string" ? { options: { targetDurationSec: intFlag(flags, "duration", 0) } } : {}),
+      }
+    : await readJsonInput(flags, "落卡请求体（或用 --analysis <analysisId>）");
+  handle(ctx, await request(ctx, "POST", `/canvases/${encodeURIComponent(canvasId)}/recreations`, body), pretty.recreation);
 }
 
 /** `reference-analysis <jobId>`：查一次拆解进度（不等）；终态时同样支持 --out / --timeline-md 落盘 */
@@ -5179,6 +5334,9 @@ const COMMANDS = {
   "creator-analysis": cmdCreatorAnalysis,
   "reference-analyze": cmdReferenceAnalyze,
   "reference-analysis": cmdReferenceAnalysis,
+  "video-analyze": cmdVideoAnalyze,
+  "video-analysis": cmdVideoAnalysis,
+  recreate: cmdRecreate,
   "reference-frames": cmdReferenceFrames,
   "reference-adapt": cmdReferenceAdapt,
   "reference-template": cmdReferenceTemplate,
