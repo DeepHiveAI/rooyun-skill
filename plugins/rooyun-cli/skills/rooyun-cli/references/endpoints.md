@@ -205,7 +205,7 @@ dj canvas structure "$CANVAS" | jq -r '.data.nodes[] | select(.title=="镜1 推�
 |---|---|---|
 | `t2i` 文生图 | `prompt` | `size`(1k/2k/4k)、`aspectRatio`、`seed`、`quality`、`watermark`、**`transparentBackground`**（透明底 PNG，见下节）、顶层 `referenceAssetIds`、**`mask`**（局部重绘，见下节） |
 | `i2i` 图生图/编辑/放大/抠图 | `image`（源图 assetId；**不读**顶层 `referenceAssetIds`） | `prompt`、`operation`(edit/upscale/removebg/look，**`removebg` 要先按 `image.removebg` 挑模型，见下节**)、`size`(1k/2k/4k，决定输出档位与计价倍率，放大请显式给)、`aspectRatio`（放大时与源图一致）、`quality`、`seed` |
-| `i2v` 图生视频 | `firstFrame` + `prompt`（带 `canvasId`/`nodeId` 且不给时取卡上的提示词） | `durationSec`（1–15，越界 400）、`resolution`(480p…4k，按模型目录)、`aspectRatio`、`audio` |
+| `i2v` 图生视频 | `firstFrame` + `prompt`（带 `canvasId`/`nodeId` 且不给时取卡上的提示词） | `durationSec`（1–15，越界 400）、`resolution`(480p…4k，按模型目录)、`aspectRatio`、`audio`（缺省出声；只有用户明确要静音才传 `false`） |
 | `flf2v` 首尾帧生视频 | `firstFrame` + `lastFrame` + `prompt`（同 `i2v`，可取卡上的） | 同 `i2v` |
 | `ref2v` 参考图生视频 | 顶层 `referenceAssetIds`（≥1，最多 9；带 `canvasId`/`nodeId` 时可按画布边自动解析）+ `prompt`（同 `i2v`，可取卡上的） | 同 `i2v`、顶层 **`referenceAudioAssetIds`**（锁角色音色，见「角色音色一致性」章；加顶层 `referenceAudioMode: "fully_copy"` 则改为**原样复用这段音频当成片声音**，如唱用户的歌：仅 H3 全参考、恰好一段、≤15 秒，时长跟随音频）、顶层 **`referenceVideoAssetIds`**（≤3 段，动作/运镜参考，见「白模换角」章） |
 | `avatar` 数字人口播 | `drivingAudio` + （`firstFrame` 或 `motionVideo` 至少一个；或管理员的专属数字人 `digitalHumanId`，见下节） | `prompt`、`aspectRatio`（见下节） |
