@@ -13,7 +13,7 @@
 | `version` | `HEAD /api/skill/bundle`（读版本头） | **无需令牌** |
 | `update` | `GET /api/skill/bundle`（下载并覆盖本地安装） | **无需令牌** |
 | `doctor` | `GET /api/v1/me` + `/billing/wallet` + 本地安装扫描 | 任何有效令牌 |
-| `models [--capability c]` | `GET /api/v1/models` | 任何有效令牌 |
+| `models [--capability c] [--tag default\|budget]` | `GET /api/v1/models`（`--tag` 在本地按 `tags` 过滤） | 任何有效令牌 |
 | `voices [--q 关键词]` | `GET /api/v1/voices` | 任何有效令牌 |
 | `digital-humans` | `GET /api/v1/digital-humans` | 任何有效令牌（**仅管理员有内容**，其余恒为空列表） |
 | `character-voices <canvasId>` | `GET /api/v1/canvases/{id}/character-voices` | `projects:read` |
@@ -132,7 +132,7 @@ dj canvas structure "$CANVAS" | jq -r '.data.nodes[] | select(.title=="镜1 推�
 | 命令 | `data` 形状 |
 |---|---|
 | `me` | `{userId, name, scopes[], expiresAt, spendLimitCredits, spentCredits}` |
-| `models` | `{models: [{id, name, description?, capabilities[], pricing: {unit, creditsPerUnit} \| null, video?, image?, audio?}]}` — `description` 是档位/取舍说明（速度档/质量档这类同名多档模型靠它选档），未填写时缺席；`audio: {emotionVector, durationFactor}` 只在配音模型且至少一位为 true 时出现（见「配音情绪向量」节） |
+| `models` | `{models: [{id, name, description?, capabilities[], pricing: {unit, creditsPerUnit, tierMultipliers?} \| null, tags?, video?, image?, audio?}]}` — `tags` 是推荐标记（`default` / `budget`，见「模型目录：怎么查、怎么选」节）；`description` 是档位/取舍说明（速度档/质量档这类同名多档模型靠它选档），未填写时缺席；`image: {sizes?, qualities?, maxReferenceImages?, outputFormats?, transparentBackground?, removebg?}` 各键只在模型声明了时出现；`audio: {emotionVector, durationFactor}` 只在配音模型且至少一位为 true 时出现（见「配音情绪向量」节） |
 | `projects list` | `{projects: [{id, name, updatedAt, defaultCanvasId}]}` + `meta{total,limit,offset}` |
 | `projects create` | `{projectId, canvasId, canvasKey, url}` |
 | `canvas list` | `{projectId, canvases: [{canvasId, canvasKey, name, isDefault, updatedAt, url}]}` |
@@ -199,12 +199,41 @@ dj canvas structure "$CANVAS" | jq -r '.data.nodes[] | select(.title=="镜1 推�
 **分页**：`limit` 默认 50 上限 100，越界一律 **400 不静默夹取**；`meta.total` 是过滤后的总数；
 `offset` 翻过头返回空页而非报错——**以空页作为翻页终止条件**。
 
+### 模型目录：怎么查、怎么选
+
+技能文档**不列具体模型**——有哪些模型、默认是谁、单价、档位、参考上限，全部每次现查
+`dj models`（`GET /v1/models`，任何有效令牌可读、不扣费）。后台换模型、调价、改默认都只改
+目录数据，你按下面的规则读就不会选错，也不用等技能升级。
+
+| 要决定的事 | 读哪个字段 | 规则 |
+|---|---|---|
+| 用户没点名时用哪个 | `tags` 含 `"default"` | `dj models --capability <cap> --tag default` 取第一行；**别按名字前缀匹配、别硬编 uuid**。没有 default 标记 → 把 2–3 个已配价候选摆给用户选 |
+| 跑不动时的低价备选 | `tags` 含 `"budget"` | `--tag budget` 的对应能力行，**只摆给用户选，不自动换**（纪律 12 / 14）；没有就只给「充值」 |
+| 同系列多档怎么取舍 | `description` | 运营写的速度/质量/风格取舍，选档看它，别按名字猜 |
+| 多少钱 | `pricing` | `null` = 未配价，提交必被拒；`tierMultipliers` = 按档倍率（基价档为 1）。**报价一律以 `precheck` 为准**——参考视频、首尾帧等场景另有价目 |
+| 档位 / 画质 | `image.sizes`、`image.qualities`、`video.resolutions` | 用户没说就用最低价档（倍率最小、且在可选档内的那档；倍率不一定是 1）并在 `precheck` 与 `generate` 两边显式带；`qualities` 只有一项就别传 `quality` |
+| 参考素材上限 | `image.maxReferenceImages`、`video.referenceImages` / `referenceVideos` / `referenceAudios` | 超出的会被丢弃或 400；`referenceVideos` 为 0 的模型不能做动作/运镜参考 |
+| 时长 | `video.durationSec` | 区间外的会被夹取；超过 15 秒直接 400 |
+| 动图 / 矢量图 | `image.outputFormats` | 含 `gif` / `svg` 的模型才能传 `params.outputFormat`（见「产物格式」节） |
+| 透明底 / 抠图 | `image.transparentBackground`、`image.removebg` | 键缺席 = 不支持（见下面两节） |
+
+```sh
+# 默认模型的 id 与最低价档（视频把 size 换成 resolution）
+ROW=$(dj models --capability t2i --tag default | jq -c '.data.models[0]')
+MODEL=$(echo "$ROW" | jq -r '.id')
+TIER=$(echo "$ROW" | jq -r '(.video.resolutions // .image.sizes) as $ok | (.pricing.tierMultipliers // {}) | to_entries | map(select($ok == null or (.key as $k | $ok | index($k)))) | min_by(.value) | .key // empty')
+```
+
+- **同名多行**是同一个模型的不同供给渠道，取第一行即可；渠道故障时平台会在同一模型内自动
+  换渠道重提（`taskId` 不变、状态保持 `queued`/`running`、不另扣费、单价不变），对你无感。
+- 目录里的标记与能力位只说「平台建议什么、模型声明了什么」，**用户点名的模型与档位永远优先**。
+
 ### 生成能力词（十二个粗粒度词）
 
 | capability | 必填输入（在 `params` 内，`ref2v` 除外） | 常用可选 |
 |---|---|---|
-| `t2i` 文生图 | `prompt` | `size`(1k/2k/4k)、`aspectRatio`、`seed`、`quality`、`watermark`、**`transparentBackground`**（透明底 PNG，见下节）、顶层 `referenceAssetIds`、**`mask`**（局部重绘，见下节） |
-| `i2i` 图生图/编辑/放大/抠图 | `image`（源图 assetId；**不读**顶层 `referenceAssetIds`） | `prompt`、`operation`(edit/upscale/removebg/look，**`removebg` 要先按 `image.removebg` 挑模型，见下节**)、`size`(1k/2k/4k，决定输出档位与计价倍率，放大请显式给)、`aspectRatio`（放大时与源图一致）、`quality`、`seed` |
+| `t2i` 文生图 | `prompt` | `size`（可选档看 `image.sizes`）、**`outputFormat`**（png/gif/svg，见「产物格式」节）、`aspectRatio`、`seed`、`quality`、`watermark`、**`transparentBackground`**（透明底 PNG，见下节）、顶层 `referenceAssetIds`、**`mask`**（局部重绘，见下节） |
+| `i2i` 图生图/编辑/放大/抠图 | `image`（源图 assetId；**不读**顶层 `referenceAssetIds`） | `prompt`、`operation`(edit/upscale/removebg/look，**`removebg` 要先按 `image.removebg` 挑模型，见下节**)、`size`（可选档看 `image.sizes`，决定输出档位与计价倍率，放大请显式给）、**`outputFormat`**（同 `t2i`）、`aspectRatio`（放大时与源图一致）、`quality`、`seed` |
 | `i2v` 图生视频 | `firstFrame` + `prompt`（带 `canvasId`/`nodeId` 且不给时取卡上的提示词） | `durationSec`（1–15，越界 400）、`resolution`(480p…4k，按模型目录)、`aspectRatio`、`audio`（缺省出声；只有用户明确要静音才传 `false`） |
 | `flf2v` 首尾帧生视频 | `firstFrame` + `lastFrame` + `prompt`（同 `i2v`，可取卡上的） | 同 `i2v` |
 | `ref2v` 参考图生视频 | 顶层 `referenceAssetIds`（≥1，最多 9；带 `canvasId`/`nodeId` 时可按画布边自动解析）+ `prompt`（同 `i2v`，可取卡上的） | 同 `i2v`、顶层 **`referenceAudioAssetIds`**（锁角色音色，见「角色音色一致性」章；加顶层 `referenceAudioMode: "fully_copy"` 则改为**原样复用这段音频当成片声音**，如唱用户的歌：仅 H3 全参考、恰好一段、≤15 秒，时长跟随音频）、顶层 **`referenceVideoAssetIds`**（≤3 段，动作/运镜参考，见「白模换角」章） |
@@ -255,7 +284,7 @@ dj generate --request-id "$(uuidgen | tr 'A-Z' 'a-z')" --model "$MODEL" \
 - **别自己往提示词里写英文 alpha 声明**。服务端会按模型注入对应措辞，你再写一遍
   属于重复，还可能和注入的句子打架。你只管把画面内容写清楚，透明底交给这个参数。
 - **先查能力再传**。目录里 `image.transparentBackground` 为 `true` 的模型才真出透明底
-  （目前只有 Qwen-Image-2.1）；其余模型传了会被**静默忽略**——不报错，但你拿到的是
+  ；其余模型传了会被**静默忽略**——不报错，但你拿到的是
   普通不透明图片。要是用户明确要透明底，就先按上面那条 jq 选模型，别拿默认模型硬上。
   **这个键只出现在 t2i 粒度的模型行上**：i2i 行整键缺席（透明底是生成时的事，
   编辑链路不下发这个参数），所以用 `== true` 判断，别写 `!= false`。
@@ -265,6 +294,23 @@ dj generate --request-id "$(uuidgen | tr 'A-Z' 'a-z')" --model "$MODEL" \
   由 `prompt` 决定。要把已有图的背景去掉，用 `i2i` + `params.operation:"removebg"`
   （**那条路要另外挑模型，见下一节**）。想生成一张「主体之外全透明」的贴纸，
   就在 `prompt` 里直说主体、别描述背景。
+
+### 产物格式：GIF / SVG（`params.outputFormat`）
+
+`t2i` / `i2i` 可传 `params.outputFormat`：`png` = 普通图片（缺省）、`gif` = 动图、`svg` = 矢量图。
+
+```sh
+# 先挑出能出 GIF 的模型——不是所有图片模型都有这个能力
+MODEL=$(dj models --capability t2i | jq -r '
+  .data.models[] | select((.image.outputFormats // []) | index("gif")) | .id' | head -1)
+dj precheck --model "$MODEL" --capability t2i --params-json '{"prompt":"…","outputFormat":"gif"}' --pretty
+```
+
+- **只有 `image.outputFormats` 列出该格式的模型能用**；其余模型传 `gif` / `svg` 提交即 400
+  （未扣费），不会静默出 PNG。`outputFormat` 只有 `t2i` / `i2i` 认，挂在视频/音频粒度上也是 400。
+- **GIF / SVG 产物不能作视频的首帧、尾帧或参考图**：`i2v` / `flf2v` / `ref2v` 引用它们提交即 422
+  （未扣费）。要拿去出视频，另用同一提示词出一张普通图片（不传 `outputFormat`）。
+- 单价、档位与普通出图一样以目录和 `precheck` 为准。
 
 ### 抠图去背景（`i2i` + `params.operation:"removebg"`）
 

@@ -1,5 +1,5 @@
 <!--
-  rooyun-skill-version: 1.57.0
+  rooyun-skill-version: 1.58.0
 
   把下面 `## RooYun 开放 API` 整段粘进你项目的 AGENTS.md（Codex）或等价的长期指令文件，
   并把 rooyun-skill/scripts/ 放到 Agent 能执行到的位置（零依赖，Node ≥ 18）。
@@ -132,16 +132,19 @@ node scripts/dj.mjs login   # ② 再跑一次：等待授权（最多 90s），
     都已连上参考图；③ 有对白的镜头对白确实在提示词里。**不要留「她」「那个男人」这类代称**
     ——跨镜生成里它指代不到任何人。发现问题先 `updateCard` 改回卡上再生成，
     只在本次请求里临时改的话，用户看到的和下次重新生成用的还是错的那版。
-12. **视频默认走 Seedance 2.0 Fast 480p；余额不够或调用失败时，把「换 MiniMax H3」和「充值」
-    两条路摆给用户选。** `i2v`/`flf2v`/`ref2v` 用户没点名模型时，一律用 `dj models` 里名字以
-    「Seedance 2.0 Fast」开头的那一行（现取 id，别硬编 uuid），**档位默认 480p**：不带
-    `resolution` 即按 480p 出片计价。用户要 720p 时 `precheck` 与 `generate` 的 params
-    **都显式带 `resolution:"720p"`**（约 480p 的 2.15 倍单价），别擅自升档。
-    用户点名了就按用户的。三种跑不动——`precheck` `ok=false` 且各项 `priced=true`（可用 < 合计，
-    常见于只有赠送积分）、402 `insufficient_credits`、任务终态 `failed` / `upstream_rejected`——
-    **不要自行换模型、不要换 requestId 盲重试**，固定话术：「A. 换 MiniMax H3（名字以
-    「MiniMax H3 ·」开头的对应能力行，更便宜、赠送积分可用，我重新报价）/ B. 去网页端充值」，
-    等用户选。`token_limit_exceeded` 不在此列（换模型、充值都没用）。
+12. **视频默认用目录里带 default 标记的模型、最低价档；余额不够或调用失败时，把「换 budget
+    低价备选」和「充值」两条路摆给用户选。** 本技能不列具体模型——`i2v`/`flf2v`/`ref2v` 用户
+    没点名模型时，一律用 `dj models --capability <cap> --tag default` 的第一行（`tags` 含
+    `"default"`；**别按名字前缀匹配、别硬编 uuid**，后台换默认只改标记）。没有 default 标记就把
+    已配价候选摆给用户选。**档位取最低价档**：`resolution` 用 `pricing.tierMultipliers` 倍率最小
+    的那一档（须在 `video.resolutions` 内），`precheck` 与 `generate` 两边都显式带；用户要高档才升（单价 ≈ 基价 × 倍率，以
+    `precheck` 为准），时长/参考上限看该行 `video` 块。用户点名了就按用户的。三种跑不动——
+    `precheck` `ok=false` 且各项 `priced=true`（可用 < 合计，常见于赠送积分不覆盖当前模型）、
+    402 `insufficient_credits`、任务终态 `failed` / `upstream_rejected`——**不要自行换模型、
+    不要换 requestId 盲重试**，固定话术：「A. 换 <`--tag budget` 里对应能力那一行的名称>（报目录
+    单价，我重新报价）/ B. 去网页端充值」，等用户选。同一模型内的渠道故障平台已自动换渠道重提
+    （`taskId` 不变、状态保持 running、不另扣费），`failed` 时已经换过了。
+    `token_limit_exceeded` 不在此列（换模型、充值都没用）。
 13. **多轮 Agent 会话：会话 id 是状态、一个 Agent 一个会话、每轮先按目录报价、跑不动不换 Agent。**
     历史与系统提示词全在服务端，你只持有 `conversationId`：每轮只发新的一句话，不要把上一轮的
     稿子再贴一遍；本地记「任务 → `conversationId`」表，丢了用 `dj chats` 捞回来，别新建会话重说。
@@ -158,14 +161,14 @@ node scripts/dj.mjs login   # ② 再跑一次：等待授权（最多 90s），
     `dj chat delete` 是**硬删**（连消息、不可撤销、网页端也没了、不退款不动账本）：
     删前必须跟用户确认，别为了「重新开始」删掉还在用的会话。
 
-14. **图片默认走 TT Image 2.5 Flare 1K；2K/4K 按档加价，赠送积分不可用**——`t2i`/`i2i`
-    都用目录里名字以「TT Image 2.5 Flare」开头的那一行（现取 id，别硬编 uuid；同名两行，
-    按 capability 各取各的）。**不带 `size` 就是 `1k`**（0.09 积分/张），2K/4K 是 1K 的
-    2.03/3.36 倍，用户要才显式传 `size`，**别擅自升档**。**别传 `quality`**（只上架 `low`
-    一档，传了也被收窄回 `low`）。**赠送积分不覆盖本模型**，只有赠送积分时报价 `ok=false`
-    或 402。参考图最多 **6 张**（顶层 `referenceAssetIds`，超出丢弃）。跑不动时把
-    「A. 换 Qwen-Image-2.1（名字以「Qwen-Image-2.1 · GPU」开头的对应能力行，自建算力、
-    固定 0.05 积分/张、赠送积分可用，我重新报价）/ B. 充值」摆给用户选，**等他点头再换**。
+14. **图片默认用目录里带 default 标记的模型、最低价档；高档按 tierMultipliers 加价，赠送积分
+    是否覆盖以报价为准**——`t2i`/`i2i` 都用 `dj models --capability <cap> --tag default` 的
+    第一行（按 capability 各取各的）。`size` 取 `image.sizes` 里倍率最小的最低价档并显式带，
+    用户要高档才升，**别擅自升档**。`image.qualities` 只有一项就**别传 `quality`**（传了也被收窄）。
+    参考图上限看 `image.maxReferenceImages`（超出丢弃）。要动图 / 矢量图只挑 `image.outputFormats`
+    含 `gif` / `svg` 的模型并传 `params.outputFormat`（未声明的模型 400）；**GIF / SVG 不能作视频的
+    首尾帧或参考图**（422）。跑不动时把「A. 换 `--tag budget` 的对应能力行（报名称与目录单价，
+    我重新报价）/ B. 充值」摆给用户选，**等他点头再换**；换过去后档位、画质、单价按备选那一行重新取。
 
 15. **博主分析一律点名 `videoIds`，别让服务端自动挑样本**——抖音自 2026-09-15 封了博主
     主页作品列表接口（游客态恒 403），自动挑样本拿不到候选池、必然 502；单条视频解析完全正常。
@@ -322,7 +325,7 @@ dj creator-archive <secUid> <videoId>            # 转存原片 → assetId（�
   本场景建议 `--params-json '{"promptCompile":"off", …}'`：提示词要逐字可控，平台自动补的
   限制段可能与动作锁定句打架。
   `referenceVideoAssetIds` 只有 `ref2v` 吃、≤3 段、模型须声明参考视频能力（否则 400
-  `model_unsupported`）、每段时长须可确认且不超模型上限（本地 H3 单段 ≤15s）、与数字人
+  `model_unsupported`）、每段时长须可确认且不超模型上限（看目录 `video` 块）、与数字人
   `motionVideo` 互斥；输出时长按参考取大，实扣另计参考视频的输入秒。
 - **数字人口播用 `avatar`**：模型从 `dj models --capability avatar` 里挑（普通视频模型会被拒，
   数字人模型也不出现在 `i2v`/`flf2v` 目录里）。`drivingAudio` 只收 wav/mp3，口型与产出时长
@@ -394,7 +397,7 @@ ASSET=$(dj task "$TASK" | jq -r '.data.assetId')
 
 **一律按 `error.code` 分支**，不要按 HTTP 状态码，更不要按 `message` 文案。
 
-- **两个 402 千万别合并**：`insufficient_credits` = 账户余额空了 → 摆出「换 MiniMax H3 / 充值」两条路（纪律 12）；
+- **两个 402 千万别合并**：`insufficient_credits` = 账户余额空了 → 摆出「换 budget 低价备选 / 充值」两条路（纪律 12）；
   `token_limit_exceeded` = **这枚令牌**的限额用尽（账户可能还有很多钱）→ 去 `/profile#api`
   调额度或换令牌，**绝不能引导用户充值**。
 - `insufficient_scope`(403) 重建令牌，不要重试；`version_mismatch`(409) 重读 structure 再写；

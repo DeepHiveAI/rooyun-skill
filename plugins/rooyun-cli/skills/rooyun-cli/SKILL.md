@@ -1,7 +1,7 @@
 ---
 name: rooyun-cli
-version: 1.57.0
-releasedAt: 2026-11-03
+version: 1.58.0
+releasedAt: 2026-11-06
 description: RooYun 精简版（CLI 自由模式）：只告诉你终端里的 dj.mjs 能调哪些能力、各产出什么——文生图、图生图/编辑、图生视频、首尾帧、参考图生视频、数字人口播、配音、音乐、音效、视频高清、视频转白模、上传素材、下载产物，以及可选的画布读写和平台 LLM 辅助（提示词优化、参考图/参考片反推提示词、剧本拆解）。不预设创作流程：提示词怎么写、先做什么后做什么、用哪个模型、要不要画布，全由用户决定。当用户说「用 RooYun 生成一张图 / 一段视频」「我自己写提示词」「别走固定流程」「直接调 RooYun 的工具」「rooyun-cli」，或提到 RooYun、ROOYUN_API_TOKEN 且想自己掌控创作时使用。生成会花用户的真钱，任何生成前先报价并等用户确认。
 ---
 
@@ -82,7 +82,7 @@ dj generate --request-id "$RID" --model … --capability … --params-json '{…
 
 | 想要 | capability | 必填 `params` | 常用可选 |
 |---|---|---|---|
-| 文生图 | `t2i` | `prompt` | `size`(1k/2k)、`aspectRatio`、`quality`(low/high)、`seed`；顶层 `--reference` 带参考图即按图编辑 |
+| 文生图 | `t2i` | `prompt` | `size`、`aspectRatio`、`quality`、`seed`（可选档看目录 `image` 块）；`outputFormat`(png/gif/svg，仅声明了的模型)；顶层 `--reference` 带参考图即按图编辑 |
 | 图生图 / 编辑 / 放大 / 抠图 | `i2i` | `image` | `prompt`、`operation`(edit/upscale/removebg/look)、`size` |
 | 局部重绘 | `t2i` | `prompt` + `mask` | `--reference <源图>`；蒙版可让用户在 `dj edit-session create` 签的链接里涂 |
 | 图生视频 | `i2v` | `firstFrame` | `prompt`、`durationSec`、`resolution`、`aspectRatio`、`audio` |
@@ -152,23 +152,29 @@ node "$SKILL/scripts/download.mjs" --asset <assetId> --out ./out --pretty
 **平台什么时候会动提示词**：只有带 `--canvas` + `--node` 提交视频时，平台会按画布上下文**追加**
 （只追加、不改写）参考声明 / 台词 / 【限制】，回执 `meta.promptCompile.applied` 如实列出补了什么。
 用户要逐字可控就在 `params` 里加 `"promptCompile":"off"`。`i2v` / `flf2v` / `ref2v` 没传 `params.prompt`
-时，带 `--node` 平台会读卡上的提示词（回执 `meta.promptSource`），不带 `--node` 则 `dj generate` 直接报错。个别模型（如 MiniMax H3）提交时会把
+时，带 `--node` 平台会读卡上的提示词（回执 `meta.promptSource`），不带 `--node` 则 `dj generate` 直接报错。个别模型提交时会把
 `<Picture i>` 这类标签翻成模型自己的语法——那是格式适配，不改内容。
 
 ## 默认模型（用户没点名时的建议，用户点名就听用户的）
 
-- **图片**：名字以「TT Image 2.5 Flare」开头的那一行（`t2i` / `i2i` 各一行，按 capability 现取 id，别硬编）。
-  不带 `size` 就是 1k（0.09 积分/张），2K/4K 是 1K 的 2.03/3.36 倍，用户要才传；别传 `quality`；
-  赠送积分不覆盖。更便宜的选择是名字以「Qwen-Image-2.1 · GPU」开头的那一行
-  （平台自建算力、固定 0.05 积分/张、赠送积分可用）。
-- **视频**（`i2v` / `flf2v` / `ref2v`）：名字以「Seedance 2.0 Fast」开头的那一行，**默认 480p**——
-  不带 `resolution` 就按 480p 出片计价；用户要 720p 时 `precheck` 与 `generate` 都显式带
-  `resolution:"720p"`（约 2.15 倍单价）。
-  更便宜的选择是名字以「MiniMax H3 ·」开头的那一行（平台自建算力、赠送积分可用）。
+本技能不列具体模型：有哪些、默认是谁、多少钱、支持哪些档位，**每次现查** `dj models`。
+
+- **默认**：`dj models --capability <cap> --tag default` 的第一行（目录 `tags` 含 `"default"`；
+  按 capability 各取各的）。别按模型名前缀匹配、别硬编 uuid——后台换默认只改标记。
+  没有 default 标记就把几个已配价候选（名称、单价、`description`）摆给用户挑。
+- **更便宜的选择**：`--tag budget` 的对应能力行（只摆给用户选，别自己换）。
+- **档位**：用户没说就用最低价档（`pricing.tierMultipliers` 倍率最小、且在该行可选档内的那档）并在 `precheck` 与
+  `generate` 两边显式带（图片 `size`、视频 `resolution`）；要高档才升，单价以 `precheck` 为准。
+  图片 `image.qualities` 只有一项就别传 `quality`；参考图上限看 `image.maxReferenceImages` /
+  `video.referenceImages`；时长看 `video.durationSec`。
+- **动图 / 矢量图**：只有 `image.outputFormats` 含 `gif` / `svg` 的模型能出，传
+  `params.outputFormat`（其余模型 400）。GIF / SVG **不能**作视频的首尾帧或参考图（422）。
+- 同一模型有多条供给渠道时，渠道故障平台会自动换渠道重提：`taskId` 不变、只是多等一会儿、不另扣费。
 
 ```sh
-MODEL=$(dj models --capability t2i | jq -r '.data.models[] | select(.name | startswith("TT Image 2.5 Flare") or startswith("GPT Image 2.5 Flare")) | .id' | head -1)
-VIDEO=$(dj models --capability ref2v | jq -r '.data.models[] | select(.name | startswith("Seedance 2.0 Fast")) | .id' | head -1)
+MODEL=$(dj models --capability t2i --tag default | jq -r '.data.models[0].id')
+VIDEO=$(dj models --capability ref2v --tag default | jq -r '.data.models[0].id')
+dj models --capability ref2v --tag budget --pretty   # 低价备选
 ```
 
 ## 画布是可选的

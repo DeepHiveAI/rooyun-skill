@@ -51,7 +51,7 @@ const DEFAULT_BASE = "https://www.rooyun.com";
  *
  * 它不是第二个真相源：生成脚本从 SKILL.md 派生写入，两处不一致时构建就红。
  */
-const EMBEDDED_SKILL_VERSION = "1.57.0";
+const EMBEDDED_SKILL_VERSION = "1.58.0";
 
 /**
  * 单次 HTTP 请求的**空闲**超时（毫秒）：两次收到字节之间允许的最大间隔，
@@ -727,9 +727,8 @@ function hintFor(status, code, meta, error) {
       // 纪律 12（视频）/ 纪律 14（图片）：别自己换模型或降档盲重试，把两条路摆给用户选
       return (
         `账户余额不足（需 ${meta?.need ?? "?"}，余 ${meta?.balance ?? "?"}）→ 把两条路摆给用户选：` +
-        "A. 降规格后重新报价——视频换 MiniMax H3（dj models 里「MiniMax H3 ·」开头的对应能力行，" +
-        "更便宜、赠送积分可用）；图片的默认 TT Image 2.5 Flare 赠送积分不覆盖，" +
-        "降成本换 Qwen-Image-2.1（「Qwen-Image-2.1 · GPU」开头的对应能力行，固定 0.05 积分/张、赠送积分可用；摆给用户选，别自己换）；" +
+        "A. 换低价备选后重新报价——`dj models --capability <cap> --tag budget` 里能力含本粒度的那一行" +
+        "（报出名称与目录单价，摆给用户选，别自己换）；" +
         `B. 去网页端充值（${BILLING_URL}）。不要自行换模型/降档、不要换 requestId 盲重试。`
       );
     case "token_limit_exceeded":
@@ -782,7 +781,7 @@ function hintFor(status, code, meta, error) {
     case "model_unsupported":
       return "模型不存在/不支持该能力：用 `dj.mjs models --capability <cap>` 重新选。带 params.mask 时还要求该模型支持局部重绘（吃参考图），不行就换一个图片模型；capability=avatar 只有数字人模型能干（它们也不出 i2v/flf2v）。";
     case "image_aspect_unsupported":
-      return "图片宽高比超出模型限制（Seedance 系横竖都不超过 2.5:1）：详情里写着是第几张、实际尺寸。把这张图裁剪或补边到范围内、重新上传，用新 assetId 再提交——改提示词或换同系模型都没用。本次未建任务、未扣费。";
+      return "图片宽高比超出该模型的限制：详情里写着是第几张、实际尺寸。把这张图裁剪或补边到范围内、重新上传，用新 assetId 再提交——改提示词或换同系模型都没用。本次未建任务、未扣费。";
     case "mask_unsupported":
       return "该模型所在渠道承载不了局部重绘蒙版（只有 OpenAI 兼容渠道有蒙版字段，其余图片渠道都没有）。换一个图片模型重试即可——素材本身没问题，别去查蒙版。";
     case "asset_unresolved":
@@ -1426,14 +1425,31 @@ const pretty = {
     d.models
       .map(
         (m) =>
-          `${m.id}  ${m.name}\n    能力 ${m.capabilities.join("/")}` +
+          `${m.id}  ${m.name}` +
+          // 推荐标记：default = 用户没点名时用它 / budget = 跑不动时摆给用户的低价备选（纪律 12 / 14）
+          (Array.isArray(m.tags) && m.tags.length ? `  [${m.tags.join(",")}]` : "") +
+          `\n    能力 ${m.capabilities.join("/")}` +
           `　单价 ${m.pricing ? `${m.pricing.creditsPerUnit}/${m.pricing.unit}` : "未配价（提交必被拒）"}` +
+          // 按档倍率：基价档为 1，高档单价 ≈ 单价 × 倍率（报价以 precheck 为准）
+          (m.pricing?.tierMultipliers
+            ? `　档位倍率 ${Object.entries(m.pricing.tierMultipliers).map(([k, v]) => `${k}×${v}`).join(" ")}`
+            : "") +
           // 视频细粒度能力面：换模型前看这一行，时长/分辨率/参考上限对不上就是 400 或静默夹取
           (m.video
             ? `\n    视频 ${m.video.durationSec.min}-${m.video.durationSec.max}s` +
               `　分辨率 ${m.video.resolutions.length ? m.video.resolutions.join("/") : "未声明"}` +
               `　参考图${m.video.referenceImages} 视频${m.video.referenceVideos} 音频${m.video.referenceAudios}` +
               `　${m.video.audio ? "原生出声" : "无声"}`
+            : "") +
+          // 图片细粒度能力面：档位 / 画质 / 参考图上限 / 产物格式 / 透明底 / 抠图（键缺席 = 未声明或不支持）
+          (m.image
+            ? `\n    图片` +
+              (m.image.sizes ? ` 档位 ${m.image.sizes.join("/")}` : "") +
+              (m.image.qualities ? `　画质 ${m.image.qualities.join("/")}` : "") +
+              (m.image.maxReferenceImages !== undefined ? `　参考图≤${m.image.maxReferenceImages}` : "") +
+              (m.image.outputFormats ? `　产物格式 ${m.image.outputFormats.join("/")}` : "") +
+              (m.image.transparentBackground ? "　透明底✓" : "") +
+              (m.image.removebg ? `　抠图 ${m.image.removebg}` : "")
             : "") +
           // 配音细粒度能力面：情绪控制各家互不通用，不打出来 Agent 只能按模型名猜
           // （缺席 = 两个都不吃，情绪只能走 emotion / styleText）
@@ -1526,7 +1542,7 @@ const pretty = {
       "※ 这是体验层报价，不是扣费承诺。请把合计报给用户并等确认后再提交。",
       // 纪律 12：各项都配了价却整批跑不动 = 余额不够（常见于只有不覆盖该模型的赠送积分）
       !d.ok && d.items.every((it) => it.priced)
-        ? "※ 可用积分不够这一批：别自己换模型/降档——把两条路摆给用户选：A. 降规格重新报价（视频换 MiniMax H3；图片的默认 TT Image 2.5 Flare 赠送积分不覆盖，换 Qwen-Image-2.1——固定 0.05 积分/张、赠送积分可用）/ B. 去网页端充值。"
+        ? "※ 可用积分不够这一批：别自己换模型/降档——把两条路摆给用户选：A. 换低价备选重新报价（dj models --capability <cap> --tag budget 里对应能力的那一行）/ B. 去网页端充值。"
         : "",
     ]
       .filter(Boolean)
@@ -1587,7 +1603,7 @@ const pretty = {
         : "",
       // 纪律 12：终态失败已退款；按 failure.code 处置，属于「跑不动」的才摆两条路，别静默换模型
       d.status === "failed"
-        ? "※ 这一笔没扣钱。若按上面的失败类型属于「跑不动」（model_unavailable，或多次重试仍失败），把两条路摆给用户选：A. 降规格重新报价再提交（视频换 MiniMax H3；图片从默认的 TT Image 2.5 Flare 换 Qwen-Image-2.1——自建算力、固定 0.05 积分/张、赠送积分可用）/ B. 充值后继续用当前模型重试（新 requestId、重新报价）。别自行换模型/降档。"
+        ? "※ 这一笔没扣钱。若按上面的失败类型属于「跑不动」（model_unavailable，或多次重试仍失败），把两条路摆给用户选：A. 换低价备选重新报价再提交（dj models --capability <cap> --tag budget 里对应能力的那一行）/ B. 充值后继续用当前模型重试（新 requestId、重新报价）。别自行换模型/降档。"
         : "",
       typeof meta?.pollAfterMs === "number" ? `建议下次轮询间隔 ${meta.pollAfterMs}ms` : "",
     ]
@@ -2162,12 +2178,38 @@ async function cmdMe(ctx) {
   handle(ctx, await request(ctx, "GET", "/me"), pretty.me);
 }
 
+/** 模型目录推荐标记（服务端 `models[].tags`，OpenAPI 2.53.0）：default = 默认 / budget = 低价备选 */
+const MODEL_TAGS = ["default", "budget"];
+
+/**
+ * 按推荐标记在本地过滤目录（不改服务端请求）：返回新信封，meta.total 跟着改。
+ * 不可变：不动原信封。
+ */
+function filterModelsByTag(result, tag) {
+  const envelope = result.envelope;
+  if (!envelope?.ok || !Array.isArray(envelope.data?.models)) return result;
+  const models = envelope.data.models.filter((m) => Array.isArray(m.tags) && m.tags.includes(tag));
+  return {
+    ...result,
+    envelope: {
+      ...envelope,
+      data: { ...envelope.data, models },
+      meta: { ...envelope.meta, total: models.length, tag },
+    },
+  };
+}
+
 async function cmdModels(ctx, { flags }) {
   const capability = flags.capability;
   if (typeof capability === "string" && !CAPABILITIES.includes(capability)) {
     fail(`--capability 只能是：${CAPABILITIES.join(" / ")}`);
   }
-  handle(ctx, await request(ctx, "GET", `/models${qs({ capability })}`), pretty.models);
+  const tag = flags.tag;
+  if (tag !== undefined && !MODEL_TAGS.includes(tag)) {
+    fail(`--tag 只能是：${MODEL_TAGS.join(" / ")}`);
+  }
+  const result = await request(ctx, "GET", `/models${qs({ capability })}`);
+  handle(ctx, typeof tag === "string" ? filterModelsByTag(result, tag) : result, pretty.models);
 }
 
 async function cmdVoices(ctx, { flags }) {
@@ -3960,7 +4002,9 @@ const HELP = `dj.mjs · RooYun 开放 API v1 客户端（零依赖，Node ≥ 18
   update [--force] [--dry-run]          把线上最新 skill 覆盖到本地安装目录（**不需令牌**）
   doctor                                一键自检：版本 / 同名安装冲突 / 令牌 scope / 余额
                                         「更新了却没生效」「明明配了令牌却报错」先跑它
-  models [--capability <cap>]           模型目录与单价（pricing 为 null = 未配价，提交必被拒）
+  models [--capability <cap>] [--tag default|budget]
+                                       模型目录与单价（pricing 为 null = 未配价，提交必被拒）；
+                                       --tag default 只看默认模型、--tag budget 只看低价备选
   voices [--q <关键词>] [--limit N] [--offset N]
                                         音色目录（配音前先挑嗓子）。kind=system 填 params.voiceId，
                                         kind=user 填 params.voiceName；id 原样回传别 trim

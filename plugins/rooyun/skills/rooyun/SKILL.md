@@ -1,7 +1,7 @@
 ---
 name: rooyun
-version: 1.57.0
-releasedAt: 2026-11-03
+version: 1.58.0
+releasedAt: 2026-11-06
 description: 用自然语言驱动 RooYun（短剧 AI 创作工作台）的开放 API：建项目与无限画布、按「剧本 → 角色/场景/道具 → 分镜视频卡 → 生成」的固定顺序搭画布、用平台 LLM 把剧本拆成结构化的角色/场景/道具/分镜再落成卡片、调模型生成图片视频音频并自动落回卡片、把一段现成视频转成白模再让新角色复刻它的动作与运镜、反推参考素材的提示词、质检分镜图、下载产物到本地、把抖音视频分享链接解析成可直接下载的视频直链，供本地看片做对标分析；以及选题情报一条链：读每日频道简报（选题 + 「AI 数字人做不做得了」的可执行性判断 + 对标参考）、订阅对标博主并按增速看谁在起来、查热榜与每日选题报告、检索文案库看别人的爆款是怎么写的（钩子/段落节奏/CTA）。当用户说「用 RooYun 生成分镜 / 把我的剧本做成视频工程 / 拆一下这个剧本的角色 / 在 RooYun 里建个项目 / 把这段视频换成我的角色重演 / 下载我 RooYun 项目的产物 / 查我 RooYun 还剩多少积分 / 帮我把这条抖音视频下下来看看 / 抓一下这个抖音博主的视频 / 今天做什么选题 / 帮我盯着这几个对标博主 / 别人这条爆款是怎么写的 / 看看今天的选题简报」，或提到 RooYun、rooyun.com、ROOYUN_API_TOKEN 时使用本技能。生成类会花用户的真钱，任何生成前必须先报价并等用户确认；选题情报那条链全部只读、不扣积分。
 ---
 
@@ -375,7 +375,7 @@ dj edit-session status "$SID" --pretty
   `--scenes` 传回去——让镜头里的人名与画布上的卡逐字对齐；把每个角色的 `shotInjection`
   映射成 `[{name, anchor}]` 用 `--anchors` 传入，否则模型每个镜头都在重新想象这个角色长什么样。
   `anchor` 每条 ≤60 字、只写硬特征——别拿 `look`（完整外貌描述）充数，超长直接 400。
-  **带上 `--video-model <出片模型id>`**：服务端按该模型的时长区间拆段（如 Seedance 最短 4 秒），
+  **带上 `--video-model <出片模型id>`**：服务端按该模型的时长区间拆段（各模型最短时长不同，见目录 `video.durationSec`），
   不传就可能拆出 3 秒段、出片时按 4 秒计费；也可直接给 `--segment-min-sec` / `--segment-max-sec`。
 - **④ 落分镜视频卡，只能用 `createStoryboard kind:"video"`**：**优先用
   `dj storyboard-fall <canvasId> -f <storyboard响应.json>`**——按场次切批、空场景名兜底、
@@ -472,47 +472,62 @@ dj edit-session status "$SID" --pretty
   都会一起没了，用户拿到无声片只能重新花钱再生成。报价时把「有声 / 无声」写进给用户
   确认的清单里。
 
-### 12. 视频默认走 Seedance 2.0 Fast 480p；余额不够或调用失败时，把「换 MiniMax H3」和「充值」两条路摆给用户选
+### 12. 视频默认用目录里带 default 标记的模型、最低价档；余额不够或调用失败时，把「换 budget 低价备选」和「充值」两条路摆给用户选
 
 用户没点名模型时，靠目录里的档位说明猜，每次选的都不一样、报价也跟着漂；
 而余额不够或上游失败时最常见的两种错误处置是「静默换个便宜模型再提交」
 （花的仍是用户的钱、成片效果还不一样）和「只说一句失败了」（用户不知道下一步能做什么）。
+默认与备选由平台在目录里标出（`tags`），按标记选才不会因为后台换了模型而选错。
 
-- **默认模型**：`i2v` / `flf2v` / `ref2v` 三种视频粒度，用户没点名模型时一律用目录里
-  名字以「Seedance 2.0 Fast」开头的那一行——`dj models --capability <cap>` 现取 id，
-  **别硬编 uuid**（后台换模型会全线失效）；**档位默认 480p**：它的目录默认档就是 480p，
-  不带 `resolution` 即按 480p 出片、按 480p 计价，报价与成片同档。用户要 720p 时
-  `precheck` 与 `generate` 的 `params` **都显式带 `resolution:"720p"`**（单价约为 480p 的
-  2.15 倍），**别擅自升档**。
+**本技能不列具体模型**：有哪些模型、默认是谁、多少钱、支持哪些档位，一律每次现查
+`dj models`（`GET /v1/models`）。目录字段说明见
+[references/endpoints.md](references/endpoints.md)「模型目录：怎么查、怎么选」。
+
+- **默认模型**：`i2v` / `flf2v` / `ref2v` 三种视频粒度，用户没点名模型时一律用
+  `dj models --capability <cap> --tag default` 的第一行（`tags` 含 `"default"`）。
+  **别按模型名前缀匹配、别硬编 uuid**——后台换默认模型只改标记，按名字挑的会选错或挑不到。
+  该粒度没有任何 `default` 标记时，把 2–3 个已配价（`pricing` 非 null）的候选连同名称、
+  单价、`description` 摆给用户选，别自己猜。
+- **档位默认最低价档**：用户没说档位时，`resolution` 取该行 `video.resolutions` 里
+  `pricing.tierMultipliers` 倍率最小的那一档（倍率不一定是 1；倍率表里有、`resolutions` 里没有的档不算），`precheck` 与 `generate` 的 `params`
+  **两边都显式带上**，报价与成片同档；没有 `tierMultipliers` = 各档同价，不传即服务端默认档。
+  用户要更高档时两边都显式带，单价 ≈ `creditsPerUnit` × 该档倍率（以 `precheck` 为准），
+  **别擅自升档**。时长区间、参考图/视频/音频上限同样以该行 `video` 块为准。
 
   ```sh
-  # 取默认视频模型的 id（按名字前缀取，不硬编）
-  MODEL=$(dj models --capability ref2v | jq -r '.data.models[] | select(.name | startswith("Seedance 2.0 Fast")) | .id' | head -1)
-  dj precheck --model "$MODEL" --capability ref2v --params durationSec=8 --pretty
-  # 用户确认后 generate 同样不带 resolution：--params-json '{"prompt":"…","durationSec":8}'
-  # 用户明确要 720p 时，precheck 与 generate 两边都加 resolution=720p / "resolution":"720p"
+  # 取默认视频模型与它的最低价档（按标记取，不按名字、不硬编）
+  ROW=$(dj models --capability ref2v --tag default | jq -c '.data.models[0]')
+  MODEL=$(echo "$ROW" | jq -r '.id')
+  TIER=$(echo "$ROW" | jq -r '(.video.resolutions // .image.sizes) as $ok | (.pricing.tierMultipliers // {}) | to_entries | map(select($ok == null or (.key as $k | $ok | index($k)))) | min_by(.value) | .key // empty')
+  dj precheck --model "$MODEL" --capability ref2v --params "durationSec=8${TIER:+,resolution=$TIER}" --pretty
+  # 用户确认后 generate 带同样的 resolution：--params-json '{"prompt":"…","durationSec":8,"resolution":"<TIER>"}'
   ```
 - 用户点名了模型或档位就按用户的（显式选择优先），报价与确认流程不变。
 - 三种「跑不动」都要停下来把两条路摆给用户，**不要自行换模型、不要换个 requestId 盲重试**：
-  ① `precheck` 的 `ok=false` 且各项 `priced=true`（`available` 小于 `total`；最常见成因是
-  用户手里只有赠送积分，而赠送积分不覆盖 Seedance）；② `precheck` / `generate` 回 402
-  `insufficient_credits`；③ 任务终态 `failed` 且 `failure.code` 为 `model_unavailable`
+  ① `precheck` 的 `ok=false` 且各项 `priced=true`（`available` 小于 `total`；常见成因是
+  用户手里只有赠送积分、而赠送积分不覆盖当前模型——覆盖范围按账户而定，以 `available`
+  为准，别凭模型名断言）；② `precheck` / `generate` 回 402 `insufficient_credits`；
+  ③ 任务终态 `failed` 且 `failure.code` 为 `model_unavailable`
   （`service_busy` 连续 3 次、`generation_failed` 重试 1 次后仍失败也算），或提交被
   `upstream_rejected` / `service_unavailable` 拒绝。
+- **渠道故障平台已自动兜底**：同一模型有多条供给渠道时，提交被拒或上游受理后失败 / 超时，
+  平台会在同一模型内自动换渠道重提——`taskId` 不变、状态保持 `queued` / `running`
+  （只是多等一会儿）、不另扣费、单价不变，对你无感。所以轮询到 `failed` 时已经换过了，
+  别自己再反复重提。
 - 任务失败先看 `failure.code`，别一律当「跑不动」：`content_rejected` / `invalid_input` /
   `invalid_params` 要改提示词、素材或参数，原样重试必然再失败；`service_busy` 等 1–5 分钟后
   换新 `requestId` 重提；`interrupted` / `no_output` 换新 `requestId` 直接重提一次。这几类
   重提的是用户确认过的同一笔（失败的那笔已退款），告诉用户你在重试即可。详见
   [references/errors.md](references/errors.md)「任务失败按 failure.code 处置」。
-- 话术固定给两个选项：「这批用 Seedance 2.0 Fast 480p 需要 X 积分，当前可用 Y，跑不动
-  （或：这次生成没成功，这一笔没扣钱）。**A.** 换 MiniMax H3——目录里名字以「MiniMax H3 ·」
-  开头、能力含本粒度的那一行（`ref2v`/`i2v` 是「全参考」，`flf2v` 是「首尾帧」），平台自建算力、
-  单价更低、赠送积分可用，我会重新报价再提交；**B.** 去网页端充值，我继续用 Seedance。」
-  然后等用户选，别替他选。
-- 选 A 是一次新的报价（纪律 1）：H3 同样有 480p / 720p 两档，`resolution` 照这批原来的给；多镜硬切段 H3 照收不拒，
-  但它偏向按单镜理解，段内构图变化密集时可能不切镜——这是**表现倾向不是接口限制**，
-  别默认替用户拆镜，先拿代表性的一段实测再定（见「提示词是模型无关的，参数不是」）。
-  别挑「MiniMax H3 Max」——那是三方渠道，比 Seedance 还贵。
+- 话术固定给两个选项：「这批用 <当前模型名> <档位> 需要 X 积分，当前可用 Y，跑不动
+  （或：这次生成没成功，这一笔没扣钱）。**A.** 换 <备选模型名>——`dj models --capability <cap> --tag budget`
+  里能力含本粒度的那一行，单价按目录报，我会重新报价再提交；**B.** 去网页端充值，我继续用当前模型。」
+  然后等用户选，别替他选。该粒度没有 `budget` 标记时只给 B，或把其它已配价候选摆出来让用户挑。
+- 选 A 是一次新的报价（纪律 1）：参数要对上备选模型自己的 `video` 块（分辨率档、时长区间、
+  参考上限可能不同），`resolution` 能沿用就沿用、不在档内就按上面取最低价档。多镜硬切段、
+  参考语义等**表现差异**见 [references/video-prompt.md](references/video-prompt.md)
+  「提示词是模型无关的，参数不是」——先拿代表性的一段实测再定，别默认替用户拆镜。
+  只从 `budget` 标记里挑，别按「名字像、看着便宜」挑别的行——同系列的三方渠道档可能比默认还贵。
 - 402 `token_limit_exceeded` 不在本条范围：换模型没用、充值也没用，按「两个 402 千万别合并」
   处置（调令牌额度或换令牌）。
 
@@ -552,49 +567,47 @@ dj edit-session status "$SID" --pretty
   贴回来，也不要自己复述一遍再当下一轮的输入。要指定「就用哪一稿」，下一轮用 `references`
   带上那个 `artifactId` 即可——服务端自己去取最新正文。
 
-### 14. 图片默认走 TT Image 2.5 Flare 1K；2K/4K 按档加价，赠送积分不可用
+### 14. 图片默认用目录里带 default 标记的模型、最低价档；高档按 tierMultipliers 加价，赠送积分是否覆盖以报价为准
 
 与视频同一个毛病：用户没点名模型时靠目录里的档位说明猜，每次选的都不一样、报价也跟着漂。
-而 TT Image 2.5 **按档计价**（2K/4K 是 1K 的 2.03/3.36 倍）且**不在赠送积分范围内**——
-不知道这两条，就会擅自升档让用户多花钱，或在用户只有赠送积分时反复撞 402。
+而分档计价的模型高档可能是基价的数倍，赠送积分也不一定覆盖——
+不看目录就会擅自升档让用户多花钱，或在用户只有赠送积分时反复撞 402。
 
-- **默认模型**：`t2i` / `i2i` 都用目录里名字以「TT Image 2.5 Flare」开头的那一行——
-  `dj models --capability <cap>` 现取 id，**别硬编 uuid**（后台换模型会全线失效）。
-  两个粒度是**同名两行**，按 capability 各取各的。Flare 偏插画暖调、人物近景更饱满；
-  同价的 Sunburst 偏实拍冷调、构图更摄影感——用户要实拍感时可提议换 Sunburst。
+- **默认模型**：`t2i` / `i2i` 都用 `dj models --capability <cap> --tag default` 的第一行
+  （按 capability 各取各的；别按名字前缀匹配、别硬编 uuid）。没有 `default` 标记时同纪律 12：
+  把已配价候选摆给用户选。同系列多档（风格、速度、质量取舍）看各行 `description`，
+  用户要的风格对不上可以提议换。
 
   ```sh
-  # 取默认图片模型的 id（按名字前缀取，不硬编；新旧名都认）
-  MODEL=$(dj models --capability t2i | jq -r '.data.models[] | select(.name | startswith("TT Image 2.5 Flare") or startswith("GPT Image 2.5 Flare")) | .id' | head -1)
-  dj precheck --model "$MODEL" --capability t2i --pretty   # 不带 size 即 1k
+  ROW=$(dj models --capability t2i --tag default | jq -c '.data.models[0]')
+  MODEL=$(echo "$ROW" | jq -r '.id')
+  TIER=$(echo "$ROW" | jq -r '(.video.resolutions // .image.sizes) as $ok | (.pricing.tierMultipliers // {}) | to_entries | map(select($ok == null or (.key as $k | $ok | index($k)))) | min_by(.value) | .key // empty')
+  dj precheck --model "$MODEL" --capability t2i ${TIER:+--params size=$TIER} --pretty
   ```
-- **档位默认 `1k`，不带 `size` 就是 `1k`**，报价与出片同档（1K 0.09 积分/张；2K ×2.03、
-  4K ×3.36）。用户要 2K/4K 时显式传 `params.size`，报价自然跟着走；**别擅自升档**。
-- **别传 `quality`**：这个模型只上架了 `low` 一个画质档，传 `high`/`standard` 会被服务端
-  收窄回 `low`——既不会更好看，也不改变计价，纯属误导用户。
-- **赠送积分不覆盖本模型**：只能由充值积分承担。用户只有赠送积分时 `precheck` 会
+- **档位默认最低价档**：`size` 取 `image.sizes` 里 `pricing.tierMultipliers` 倍率最小的那一档，
+  报价与提交两边显式带上；没有 `tierMultipliers` = 各档同价。用户要 2K/4K 这类高档时显式传
+  `params.size`，报价自然跟着走；**别擅自升档**。
+- **`quality` 看 `image.qualities`**：只有一项就别传（传别的值会被服务端收窄回这一项，
+  既不更好看也不改计价，纯属误导用户）；有多项时用户没要求就别传。
+- **赠送积分是否覆盖以报价为准**：覆盖范围按账户而定，别凭模型名断言。`precheck` 回
   `ok=false`（`available` 小于 `total`）或提交回 402 `insufficient_credits`，按下面「跑不动」处置。
-- `t2i` 的参考图最多 **6 张**（顶层 `referenceAssetIds`），超出的会被丢弃。
+- **参考图上限看 `image.maxReferenceImages`**（`t2i` 的顶层 `referenceAssetIds`，超出的会被丢弃）。
   `i2i` **不读** `referenceAssetIds`：要编辑的源图放 `params.image`。局部重绘的蒙版规则不变
   （`mask` 只有 `t2i` 消费，见下文；模型不吃蒙版会回 422 `mask_unsupported`）。
-- **失败信息说「上游服务内部故障」时**：改提示词、换参考图都没用，提交失败的这一笔也不扣钱
-  （冻结已退回）。最多原样再试一次，仍失败就如实告诉用户并按下面「跑不动」处置。
+- **动图 / 矢量图**：只挑 `image.outputFormats` 含 `gif` / `svg` 的模型并传
+  `params.outputFormat`（未声明的模型提交即 400，不会静默出 PNG）。GIF / SVG 产物**不能**作
+  视频的首帧、尾帧或参考图（提交视频回 422），要接视频就另出一张普通图片。详见
+  [references/endpoints.md](references/endpoints.md)「产物格式：GIF / SVG」。
+- **失败信息说「上游服务内部故障」时**：平台已在同一模型内自动换过渠道（同纪律 12），
+  改提示词、换参考图都没用，失败的这一笔也不扣钱（冻结已退回）。最多原样再试一次，
+  仍失败就如实告诉用户并按下面「跑不动」处置。
 - **跑不动时同纪律 12 的两条路，别自己换模型**：`precheck` 回 `ok=false`、402
   `insufficient_credits`，或任务终态 `failed` 且按纪律 12 的 `failure.code` 口径属于
   「跑不动」时，把两条路摆给用户等他选：
-  **A.** 换 Qwen-Image-2.1（目录里名字以「Qwen-Image-2.1 · GPU」开头、能力含本粒度的那一行，
-  平台自建算力、固定 0.05 积分/张、赠送积分可用，我会重新报价再提交）；
-  **B.** 去网页端充值。**等用户点头再换**——换模型是创作决策，不要替他选。
-
-  ```sh
-  # failover：按名字前缀取（不硬编 uuid）
-  FALLBACK=$(dj models --capability i2i | jq -r '.data.models[] | select(.name | startswith("Qwen-Image-2.1")) | .id' | head -1)
-  dj precheck --model "$FALLBACK" --capability i2i --pretty   # 换模型 = 一次新的报价（纪律 1）
-  ```
-
-  换过去之后口径也跟着换：Qwen-Image-2.1 按张固定价（1K/2K、各画质档、文生图与编辑同价），
-  档位只有 `1k`/`2k`（不带 `size` 是 `2k`，没有 4K）；`quality` 在它上面是真参数（映射采样步数，
-  `high` 更精细更慢、不加价）；参考图最多 9 张。
+  **A.** 换 `dj models --capability <cap> --tag budget` 里能力含本粒度的那一行（报出它的名称与
+  目录单价，我会重新报价再提交）；**B.** 去网页端充值。**等用户点头再换**——换模型是创作决策，
+  不要替他选。换过去之后档位、画质、参考图上限、单价都按备选那一行的目录信息重新取
+  （它的 `sizes` / `qualities` 可能与默认完全不同，`quality` 在有多档的模型上才是真参数）。
 - 用户点名了模型或档位就按用户的（显式选择优先），报价与确认流程不变。
 
 ### 15. 博主分析一律点名 videoIds，别让服务端自动挑样本
@@ -669,14 +682,13 @@ dj canvas lint <canvasId> --pretty
 
 # 5) 挑模型 → 报价 → **等用户确认**（配音的话先 dj voices 挑嗓子——用户自建的「我的音色」也在里面，provider 为 selfhosted；要控情绪看 endpoints.md「配音情绪向量」节）
 dj models --capability i2v --pretty
-#    视频（i2v/flf2v/ref2v）用户没点名就用「Seedance 2.0 Fast」、不带 resolution 即 480p
-#    （纪律 12；用户要 720p 才显式带 params.resolution="720p"，约 2.15 倍单价）；图片（t2i/i2i）
-#    用户没点名就用「TT Image 2.5 Flare」、不带 size 即 1k（纪律 14）。其余同一模型系拆多档
-#    （速度档/质量档）、能力与单价完全一致时，取舍写在条目的 description 里——选档看它
+#    用户没点名就用 tags 含 default 的那一行（--tag default），档位取 tierMultipliers 倍率最小
+#    的最低价档并显式带上（视频纪律 12、图片纪律 14）。同一模型系拆多档（速度档/质量档）、
+#    能力与单价完全一致时，取舍写在条目的 description 里——选档看它
 dj precheck -f /tmp/quote.json --pretty
 #    ↑ 把「合计 X 积分 / 可用 Y」报给用户，等一个明确的「继续」
 #    ok=false（可用 < 合计）或后面 402 insufficient_credits / 任务 failed：
-#    别自己换模型——把「A. 换 MiniMax H3（更便宜、赠送积分可用）/ B. 充值」摆给用户选
+#    别自己换模型——把「A. 换 --tag budget 的低价备选（重新报价）/ B. 充值」摆给用户选
 
 # 6) 定向生成（幂等键存好）+ 轮询到终态
 RID=$(dj uuid)
@@ -808,7 +820,7 @@ node "$SKILL/scripts/download.mjs" --jianying <canvasId> --group <分镜组group
 这几条不读详版也**必须**知道——弄错了要么让用户白花钱，要么把自己写进死循环：
 
 - **两个 402 处置相反，绝不能合并**：`insufficient_credits` 是账户没钱
-  （摆出「换 MiniMax H3」或「去充值」两条路，纪律 12）；
+  （摆出「换 budget 低价备选」或「去充值」两条路，纪律 12）；
   `token_limit_exceeded` 是**这枚令牌**的限额用尽，账户里可能钱还多得很——
   **引导充值是错的**，充了照样跑不动，该去 `/profile#api` 调额度或换令牌。
 - **`succeeded` 但没有 `assetId` 不是失败**：产物做出来了、**钱已经花了**，只是代取转存失败。
