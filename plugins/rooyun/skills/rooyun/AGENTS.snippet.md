@@ -1,5 +1,5 @@
 <!--
-  rooyun-skill-version: 1.58.0
+  rooyun-skill-version: 1.59.0
 
   把下面 `## RooYun 开放 API` 整段粘进你项目的 AGENTS.md（Codex）或等价的长期指令文件，
   并把 rooyun-skill/scripts/ 放到 Agent 能执行到的位置（零依赖，Node ≥ 18）。
@@ -165,7 +165,7 @@ node scripts/dj.mjs login   # ② 再跑一次：等待授权（最多 90s），
     是否覆盖以报价为准**——`t2i`/`i2i` 都用 `dj models --capability <cap> --tag default` 的
     第一行（按 capability 各取各的）。`size` 取 `image.sizes` 里倍率最小的最低价档并显式带，
     用户要高档才升，**别擅自升档**。`image.qualities` 只有一项就**别传 `quality`**（传了也被收窄）。
-    参考图上限看 `image.maxReferenceImages`（超出丢弃）。要动图 / 矢量图只挑 `image.outputFormats`
+    参考图上限看 `image.maxReferenceImages`（超出即拒、不扣费，不会静默丢弃）。要动图 / 矢量图只挑 `image.outputFormats`
     含 `gif` / `svg` 的模型并传 `params.outputFormat`（未声明的模型 400）；**GIF / SVG 不能作视频的
     首尾帧或参考图**（422）。跑不动时把「A. 换 `--tag budget` 的对应能力行（报名称与目录单价，
     我重新报价）/ B. 充值」摆给用户选，**等他点头再换**；换过去后档位、画质、单价按备选那一行重新取。
@@ -312,7 +312,7 @@ dj creator-archive <secUid> <videoId>            # 转存原片 → assetId（�
 ### 生成能力词
 
 `t2i`(prompt) · `i2i`(image) · `i2v`(firstFrame) · `flf2v`(firstFrame+lastFrame) ·
-`ref2v`(顶层 referenceAssetIds≥1) · `avatar`(drivingAudio + firstFrame/motionVideo 二选一) ·
+`ref2v`(顶层参考图/参考视频/参考音频至少一项；只给音频须模型 `video.referenceAudioOnly`) · `avatar`(drivingAudio + firstFrame/motionVideo 二选一) ·
 `t2a`(text) · `music`(text) · `sfx`(text) ·
 `upscale`(video，**专指视频**高清；图片放大是 `i2i` + `operation:"upscale"`) ·
 `v2a`(video，抽音轨；定嗓样本提取) · `blockout`(sourceVideo，视频转白模)。
@@ -324,7 +324,8 @@ dj creator-archive <secUid> <videoId>            # 转存原片 → assetId（�
   `<Video 1>`，不参考其画风、色彩、材质与背景」，**绝不描述具体动作**（模型会听文字不听视频）。
   本场景建议 `--params-json '{"promptCompile":"off", …}'`：提示词要逐字可控，平台自动补的
   限制段可能与动作锁定句打架。
-  `referenceVideoAssetIds` 只有 `ref2v` 吃、≤3 段、模型须声明参考视频能力（否则 400
+  `referenceVideoAssetIds` 只有 `ref2v` 吃、段数按模型目录 `video.referenceVideos`（与参考图、参考音频
+  合计不超 `video.referenceTotal`，超出即拒不扣费）、模型须声明参考视频能力（否则 400
   `model_unsupported`）、每段时长须可确认且不超模型上限（看目录 `video` 块）、与数字人
   `motionVideo` 互斥；输出时长按参考取大，实扣另计参考视频的输入秒。
 - **数字人口播用 `avatar`**：模型从 `dj models --capability avatar` 里挑（普通视频模型会被拒，

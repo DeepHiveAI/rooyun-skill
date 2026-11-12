@@ -56,7 +56,7 @@ dj character-voices $CANVAS --bind "林小满" --sample $VOICE_SAMPLE --label "�
 dj generate --request-id <新uuid> --model <ref2v模型id> --capability ref2v \
    --canvas $CANVAS --node $SHOT_NODE
 #    提交回执核对：meta.voiceSamples.injected = 注入了谁的哪个样本；skipped = 被跳过的及原因
-#    （超模型段数上限 / 单段不在 2–15 秒 / 合计超 15 秒 / 非 wav·mp3）；
+#    （超模型段数上限或三类参考合计上限 / 单段不在 2–15 秒 / 合计超模型 referenceMediaMaxSec / 非 wav·mp3）；
 #    meta.promptCompile.applied 含 voiceCast = 配音段已补。injected 为空 = 这镜没锁上嗓，别提交下一镜。
 #
 #    手动挡（仍然有效）：自己传 --reference-audio 就一律以你的为准、不再自动注入；
@@ -84,9 +84,9 @@ dj generate --request-id <新uuid> --model <ref2v模型id> --capability ref2v \
 | 约束 | 数值 | 违反后果 |
 |---|---|---|
 | 参考音频只有 `ref2v` 吃 | — | 挂别的能力词直接 400（别的链路不透传，放行=假锁嗓） |
-| 每段时长 | **2–15 秒** | 服务端按资产真实时长核对，超界 400 |
-| 段数上限 | 3 段 | 上游只有三路通道 |
-| 必须伴随参考图 | ≥1 张 | `ref2v` 本就要求，照常给 |
+| 每段时长 | **2 秒起，上限看目录 `video.referenceMediaMaxSec`**（如 Seedance 2.0 系 15 秒、2.5 为 30 秒；合计也不超它） | 服务端按资产真实时长核对，超界 400。定嗓绑定的样本仍须 2–15 秒（④ 步） |
+| 段数上限 | 看目录 `video.referenceAudios`，且与参考图、参考视频合计不超 `video.referenceTotal` | 超出即拒、不扣费，不会静默丢段；自动注入只注入放得下的段数，其余记进 `meta.voiceSamples.skipped` |
+| 搭配参考图 / 参考视频 | 至少 1 张图或 1 段视频，除非模型 `video.referenceAudioOnly: true` | 定嗓场景本来就带角色参考图，照常给 |
 | 容器 | 仅 wav / mp3 | 其余测不出时长，入口拒绝 |
 | **样本别裁短** | 保留完整台词段（≥5s 量级） | 实测硬结论：3 秒短样本会让模型把提示词里的
 参考声明念进台词（两个 seed 100% 复现）；试镜片单人单句，**整条音轨即样本，无需任何裁剪** |

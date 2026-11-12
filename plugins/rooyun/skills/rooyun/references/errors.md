@@ -58,7 +58,7 @@ HTTP 状态码恒为 200**，真实状态码改放在信封的 `meta.httpStatus`
 | `insufficient_scope` | 403 | 令牌缺 scope，请用户重建一枚勾上对应权限的。不要重试 |
 | `radar_not_enabled` | 403 | 账号没开通「选题雷达」。**与 scope 无关——重建令牌不解决任何问题**，要管理员给账号开通。雷达 / 简报 / 文案库三个域共用这一个权益，任一域被拒都是这个码 |
 | `token_revoked` / `token_expired` / `token_invalid` | 401 | 请用户重新签发并更新环境变量 |
-| `invalid_request` | 400 | 参数不合法，整批 fail fast，没有半批落盘。改参数，别重试 |
+| `invalid_request` | 400 | 参数不合法，整批 fail fast，没有半批落盘。改参数，别重试。参考素材超出模型目录声明的张数 / 段数 / 合计（`video.referenceImages` 等）也会在提交时被拒（400/422，未扣费）——删减参考或换上限更高的模型 |
 | `not_found` | 404 | 不存在**或不属于本令牌**（刻意不区分，防资源探测） |
 | `rate_limited` | 429 | 退避后重试。下载端点上它还有第二种成因：**在途签名授权预算（512 MiB/令牌）被并发拉大件占满**，此时带 `meta.retryAfterSeconds`（秒），等一等或把并发降下来即可——别当成配额耗尽去换令牌 |
 | `version_mismatch` | 409 | 你给的 `ifVersion` 已过期 → 重读 `structure` 拿新 version 再写。**盲目重试无意义** |

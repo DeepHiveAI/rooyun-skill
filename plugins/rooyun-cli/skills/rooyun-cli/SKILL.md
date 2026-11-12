@@ -1,7 +1,7 @@
 ---
 name: rooyun-cli
-version: 1.58.0
-releasedAt: 2026-11-06
+version: 1.59.0
+releasedAt: 2026-11-12
 description: RooYun 精简版（CLI 自由模式）：只告诉你终端里的 dj.mjs 能调哪些能力、各产出什么——文生图、图生图/编辑、图生视频、首尾帧、参考图生视频、数字人口播、配音、音乐、音效、视频高清、视频转白模、上传素材、下载产物，以及可选的画布读写和平台 LLM 辅助（提示词优化、参考图/参考片反推提示词、剧本拆解）。不预设创作流程：提示词怎么写、先做什么后做什么、用哪个模型、要不要画布，全由用户决定。当用户说「用 RooYun 生成一张图 / 一段视频」「我自己写提示词」「别走固定流程」「直接调 RooYun 的工具」「rooyun-cli」，或提到 RooYun、ROOYUN_API_TOKEN 且想自己掌控创作时使用。生成会花用户的真钱，任何生成前先报价并等用户确认。
 ---
 
@@ -87,7 +87,7 @@ dj generate --request-id "$RID" --model … --capability … --params-json '{…
 | 局部重绘 | `t2i` | `prompt` + `mask` | `--reference <源图>`；蒙版可让用户在 `dj edit-session create` 签的链接里涂 |
 | 图生视频 | `i2v` | `firstFrame` | `prompt`、`durationSec`、`resolution`、`aspectRatio`、`audio` |
 | 首尾帧视频 | `flf2v` | `firstFrame` + `lastFrame` | 同上 |
-| 参考图生视频 | `ref2v` | 顶层 `--reference`（1–9 张） | 同上；`--reference-audio` 锁音色、`--reference-video` 动作/运镜参考 |
+| 参考生视频 | `ref2v` | 顶层 `--reference` / `--reference-video` / `--reference-audio` 至少一项（只给音频须模型 `video.referenceAudioOnly`；张数 / 段数上限看目录，见下） | 同上；`--reference-audio` 锁音色、`--reference-video` 动作/运镜参考 |
 | 数字人口播 | `avatar` | `drivingAudio`(wav/mp3) + `firstFrame` 或 `motionVideo` | `prompt`、`aspectRatio` |
 | 配音 | `t2a` | `text` + `voiceId`(系统音色) 或 `voiceName`(用户音色)（必填，`dj voices` 挑；不传 = 400）。`provider:"gemini"` 的音色（`kore` 这类预置、`voice_` 开头的设计音色）一律填 `voiceId`，只配 GM 模型 | `speed`、`emotion`；GM / VoxCPM2 用 `styleText`（一句风格指令，≤100 字、不含括号，GM 不认 `emotion`） |
 | 音乐 | `music` | `text` | `lyrics`、`instrumental`、`durationSec` |
@@ -165,8 +165,11 @@ node "$SKILL/scripts/download.mjs" --asset <assetId> --out ./out --pretty
 - **更便宜的选择**：`--tag budget` 的对应能力行（只摆给用户选，别自己换）。
 - **档位**：用户没说就用最低价档（`pricing.tierMultipliers` 倍率最小、且在该行可选档内的那档）并在 `precheck` 与
   `generate` 两边显式带（图片 `size`、视频 `resolution`）；要高档才升，单价以 `precheck` 为准。
-  图片 `image.qualities` 只有一项就别传 `quality`；参考图上限看 `image.maxReferenceImages` /
-  `video.referenceImages`；时长看 `video.durationSec`。
+  图片 `image.qualities` 只有一项就别传 `quality`；时长看 `video.durationSec`。
+- **参考素材上限**：一律以目录为准、各模型不同，别硬编张数——图片看 `image.maxReferenceImages`，
+  视频看 `video.referenceImages` / `referenceVideos` / `referenceAudios` 与三类合计 `referenceTotal`、
+  参考音视频时长 `referenceMediaMaxSec`（例：Seedance 2.0 系 9/3/3/合计 12、≤15 秒；Seedance 2.5
+  30/10/10/合计 50、≤30 秒）。**超出即被拒（400/422）、不建任务不扣费，不会静默截断**——先删减或换模型。
 - **动图 / 矢量图**：只有 `image.outputFormats` 含 `gif` / `svg` 的模型能出，传
   `params.outputFormat`（其余模型 400）。GIF / SVG **不能**作视频的首尾帧或参考图（422）。
 - 同一模型有多条供给渠道时，渠道故障平台会自动换渠道重提：`taskId` 不变、只是多等一会儿、不另扣费。

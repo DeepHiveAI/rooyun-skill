@@ -52,6 +52,7 @@
 | 时长区间（`video.durationSec`，各模型不同） | `durationSec` 超过 15 直接 400；1–15 内但不在模型区间的会被夹取到区间内 |
 | 分辨率档（`video.resolutions`，各模型不同；价差看 `pricing.tierMultipliers`） | 不在档内的 `resolution` 回退默认档 |
 | 参考视频 / 参考音频上限为 0 | 带了对应素材直接 400 `model_unsupported` |
+| 参考图 / 参考视频 / 参考音频的张数、段数与三类合计（`video.referenceImages` / `referenceVideos` / `referenceAudios` / `referenceTotal`，各模型不同） | 超出即拒（不建任务、不扣费），**不会替你截断**；换到上限更低的模型前先删减参考 |
 
 两家的语义差异（提示词照写，但预期要对）：
 

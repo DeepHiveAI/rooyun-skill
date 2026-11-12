@@ -1,7 +1,7 @@
 ---
 name: rooyun
-version: 1.58.0
-releasedAt: 2026-11-06
+version: 1.59.0
+releasedAt: 2026-11-12
 description: 用自然语言驱动 RooYun（短剧 AI 创作工作台）的开放 API：建项目与无限画布、按「剧本 → 角色/场景/道具 → 分镜视频卡 → 生成」的固定顺序搭画布、用平台 LLM 把剧本拆成结构化的角色/场景/道具/分镜再落成卡片、调模型生成图片视频音频并自动落回卡片、把一段现成视频转成白模再让新角色复刻它的动作与运镜、反推参考素材的提示词、质检分镜图、下载产物到本地、把抖音视频分享链接解析成可直接下载的视频直链，供本地看片做对标分析；以及选题情报一条链：读每日频道简报（选题 + 「AI 数字人做不做得了」的可执行性判断 + 对标参考）、订阅对标博主并按增速看谁在起来、查热榜与每日选题报告、检索文案库看别人的爆款是怎么写的（钩子/段落节奏/CTA）。当用户说「用 RooYun 生成分镜 / 把我的剧本做成视频工程 / 拆一下这个剧本的角色 / 在 RooYun 里建个项目 / 把这段视频换成我的角色重演 / 下载我 RooYun 项目的产物 / 查我 RooYun 还剩多少积分 / 帮我把这条抖音视频下下来看看 / 抓一下这个抖音博主的视频 / 今天做什么选题 / 帮我盯着这几个对标博主 / 别人这条爆款是怎么写的 / 看看今天的选题简报」，或提到 RooYun、rooyun.com、ROOYUN_API_TOKEN 时使用本技能。生成类会花用户的真钱，任何生成前必须先报价并等用户确认；选题情报那条链全部只读、不扣积分。
 ---
 
@@ -416,6 +416,9 @@ dj edit-session status "$SID" --pretty
   并在回执 `meta.resolvedReferences` 里回显每一张的来源（`assetId` / `sourceNodeId` / `via` /
   `label`）。**回显要逐条核对**：与你预期的设定板对不上，说明画布连线不是你以为的样子，
   先去改边再生成。没有任何参考连线的视频卡**不要生成**（解析为空时服务端照常报「缺参考」）。
+  连的设定板多于所选模型的参考图上限（目录 `video.referenceImages`）时，自动解析按该上限取前几张，
+  回执 `meta.resolvedReferences.truncated` 为 `true`——被挤掉的板这一镜**没参考到**，要么精简连线，
+  要么换上限更高的模型；自己用 `--reference` 传时超限则直接被拒（不扣费），不会替你截。
   **提示词也会从卡上读**：带 `--node` 且没给 `params.prompt` 时，服务端用卡上的 `prompt`
   （与网页点「生成」同源），回执 `meta.promptSource` 会写明来源卡；卡上为空才报「缺少 params.prompt」。
   **画幅 / 清晰度 / 时长同样读卡**：请求没给的就取卡上的 `aspectRatio` / `resolution` / `durationSec`，
@@ -591,7 +594,11 @@ dj edit-session status "$SID" --pretty
   既不更好看也不改计价，纯属误导用户）；有多项时用户没要求就别传。
 - **赠送积分是否覆盖以报价为准**：覆盖范围按账户而定，别凭模型名断言。`precheck` 回
   `ok=false`（`available` 小于 `total`）或提交回 402 `insufficient_credits`，按下面「跑不动」处置。
-- **参考图上限看 `image.maxReferenceImages`**（`t2i` 的顶层 `referenceAssetIds`，超出的会被丢弃）。
+- **参考图上限看 `image.maxReferenceImages`**（`t2i` 的顶层 `referenceAssetIds`；超出上限提交会被
+  直接拒绝、不扣费，**不会静默丢弃**——先删减或换上限更高的模型）。视频同理看
+  `video.referenceImages` / `referenceVideos` / `referenceAudios` 与合计 `video.referenceTotal`：
+  各模型按官方能力声明、彼此不同，**别把某个模型的数字套用到别的模型**（详见
+  [references/endpoints.md](references/endpoints.md)「模型目录：怎么查、怎么选」）。
   `i2i` **不读** `referenceAssetIds`：要编辑的源图放 `params.image`。局部重绘的蒙版规则不变
   （`mask` 只有 `t2i` 消费，见下文；模型不吃蒙版会回 422 `mask_unsupported`）。
 - **动图 / 矢量图**：只挑 `image.outputFormats` 含 `gif` / `svg` 的模型并传

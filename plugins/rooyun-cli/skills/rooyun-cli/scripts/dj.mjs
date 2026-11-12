@@ -51,7 +51,7 @@ const DEFAULT_BASE = "https://www.rooyun.com";
  *
  * 它不是第二个真相源：生成脚本从 SKILL.md 派生写入，两处不一致时构建就红。
  */
-const EMBEDDED_SKILL_VERSION = "1.58.0";
+const EMBEDDED_SKILL_VERSION = "1.59.0";
 
 /**
  * 单次 HTTP 请求的**空闲**超时（毫秒）：两次收到字节之间允许的最大间隔，
@@ -982,7 +982,8 @@ function qs(params) {
 function renderResolvedReferences(resolved) {
   if (!resolved || !Array.isArray(resolved.references)) return [];
   const lines = [
-    `自动解析参考（来源 ${resolved.source}）${resolved.truncated ? "　⚠ 超 9 张已截断" : ""}`,
+    // truncated：画布连的设定板多于所选模型的参考图上限（目录 video.referenceImages），只取了前几张
+    `自动解析参考（来源 ${resolved.source}）${resolved.truncated ? "　⚠ 超出该模型参考图上限，只取了前几张" : ""}`,
   ];
   for (const [i, ref] of resolved.references.entries()) {
     const from = ref.sourceNodeId ? `node ${ref.sourceNodeId}` : "资产库成员";
@@ -1439,6 +1440,10 @@ const pretty = {
             ? `\n    视频 ${m.video.durationSec.min}-${m.video.durationSec.max}s` +
               `　分辨率 ${m.video.resolutions.length ? m.video.resolutions.join("/") : "未声明"}` +
               `　参考图${m.video.referenceImages} 视频${m.video.referenceVideos} 音频${m.video.referenceAudios}` +
+              // 合计 / 纯音频 / 参考音视频时长（OpenAPI 2.54.0 起；旧服务端没有这三位，防御式读）
+              (m.video.referenceTotal !== undefined ? ` 合计${m.video.referenceTotal}` : "") +
+              (m.video.referenceAudioOnly ? "（可只给音频）" : "") +
+              (m.video.referenceMediaMaxSec !== undefined ? `　参考音视频≤${m.video.referenceMediaMaxSec}s` : "") +
               `　${m.video.audio ? "原生出声" : "无声"}`
             : "") +
           // 图片细粒度能力面：档位 / 画质 / 参考图上限 / 产物格式 / 透明底 / 抠图（键缺席 = 未声明或不支持）
@@ -2916,12 +2921,14 @@ async function cmdGenerate(ctx, { flags }) {
       typeof flags.reference === "string"
         ? flags.reference.split(",").map((s) => s.trim()).filter(Boolean)
         : undefined;
-    // 参考音频（ref2v 锁音色，试镜定嗓第 ⑤ 步）：顺序即 <Audio j> 编号，最多 3 段
+    // 参考音频（ref2v 锁音色，试镜定嗓第 ⑤ 步）：顺序即 <Audio j> 编号。
+    // 段数上限按模型目录（video.referenceAudios / referenceTotal）由服务端判，客户端不截断——超出即拒、不扣费
     const referenceAudios =
       typeof flags["reference-audio"] === "string"
         ? flags["reference-audio"].split(",").map((s) => s.trim()).filter(Boolean)
         : undefined;
-    // 参考视频（ref2v 动作/运镜参考，白模换角链路的后半段）：顺序即 <Video k> 编号，最多 3 段
+    // 参考视频（ref2v 动作/运镜参考，白模换角链路的后半段）：顺序即 <Video k> 编号。
+    // 段数上限同上按模型目录（video.referenceVideos / referenceTotal）由服务端判，客户端不截断
     const referenceVideos =
       typeof flags["reference-video"] === "string"
         ? flags["reference-video"].split(",").map((s) => s.trim()).filter(Boolean)
@@ -4140,9 +4147,12 @@ const HELP = `dj.mjs · RooYun 开放 API v1 客户端（零依赖，Node ≥ 18
            [--canvas <canvasId> --node <nodeId>] [--reference <assetId,…>]
            [--reference-audio <assetId,…>] [--reference-video <assetId,…>]
                                         提交生成。**requestId 必填**（幂等键，重试原样复用）。
-                                        --reference-audio 仅 ref2v（锁音色，≤3 段、每段 2–15s
-                                        wav/mp3；顺序即提示词 <Audio j> 编号），见「角色音色一致性」
-                                        --reference-video 仅 ref2v（动作/运镜参考，≤3 段视频资产，
+                                        参考图 / 参考音频 / 参考视频的张数、段数、合计与时长上限
+                                        一律看 dj models 该模型的「视频」行（各模型不同），
+                                        超出即被拒、不扣费，不会替你截断
+                                        --reference-audio 仅 ref2v（锁音色，wav/mp3；顺序即提示词
+                                        <Audio j> 编号），见「角色音色一致性」
+                                        --reference-video 仅 ref2v（动作/运镜参考，视频资产，
                                         模型须声明参考视频能力；顺序即提示词 <Video k> 编号），
                                         白模换角：先 --capability blockout --params sourceVideo=<原片>
                                         出白模片，再把它当 --reference-video 喂 ref2v，见「白模换角」
