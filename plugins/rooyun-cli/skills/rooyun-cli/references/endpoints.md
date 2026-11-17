@@ -213,7 +213,7 @@ dj canvas structure "$CANVAS" | jq -r '.data.nodes[] | select(.title=="镜1 推�
 | 多少钱 | `pricing` | `null` = 未配价，提交必被拒；`tierMultipliers` = 按档倍率（基价档为 1）。**报价一律以 `precheck` 为准**——参考视频、首尾帧等场景另有价目 |
 | 档位 / 画质 | `image.sizes`、`image.qualities`、`video.resolutions` | 用户没说就用最低价档（倍率最小、且在可选档内的那档；倍率不一定是 1）并在 `precheck` 与 `generate` 两边显式带；`qualities` 只有一项就别传 `quality` |
 | 参考素材上限 | `image.maxReferenceImages`、`video.referenceImages` / `referenceVideos` / `referenceAudios` / `referenceTotal`（三类合计）、`video.referenceAudioOnly`、`video.referenceMediaMaxSec` | **各模型按官方能力声明、彼此不同，一律以目录为准，别硬编张数**。超出任一上限提交即被拒（400/422，不建任务、不扣费），**不会静默截断**——先删减或换上限更高的模型。例：Seedance 2.0 系 图 9 / 视频 3 / 音频 3 / 合计 12、参考音视频 ≤15 秒；Seedance 2.5 图 30 / 视频 10 / 音频 10 / 合计 50、≤30 秒且可只给参考音频（`referenceAudioOnly: true`）。`referenceVideos` 为 0 的模型不能做动作/运镜参考 |
-| 时长 | `video.durationSec` | 区间外的会被夹取；超过 15 秒直接 400 |
+| 时长 | `video.durationSec` | 区间外的会被夹取；超过 30 秒直接 400；16–30 秒只有目录上限 ≥ 该值的模型接受（目前只有官方直连 Seedance 2.5，4–30 秒），其余模型 400、不扣费 |
 | 动图 / 矢量图 | `image.outputFormats` | 含 `gif` / `svg` 的模型才能传 `params.outputFormat`（见「产物格式」节） |
 | 透明底 / 抠图 | `image.transparentBackground`、`image.removebg` | 键缺席 = 不支持（见下面两节） |
 
@@ -234,7 +234,7 @@ TIER=$(echo "$ROW" | jq -r '(.video.resolutions // .image.sizes) as $ok | (.pric
 |---|---|---|
 | `t2i` 文生图 | `prompt` | `size`（可选档看 `image.sizes`）、**`outputFormat`**（png/gif/svg，见「产物格式」节）、`aspectRatio`、`seed`、`quality`、`watermark`、**`transparentBackground`**（透明底 PNG，见下节）、顶层 `referenceAssetIds`、**`mask`**（局部重绘，见下节） |
 | `i2i` 图生图/编辑/放大/抠图 | `image`（源图 assetId；**不读**顶层 `referenceAssetIds`） | `prompt`、`operation`(edit/upscale/removebg/look，**`removebg` 要先按 `image.removebg` 挑模型，见下节**)、`size`（可选档看 `image.sizes`，决定输出档位与计价倍率，放大请显式给）、**`outputFormat`**（同 `t2i`）、`aspectRatio`（放大时与源图一致）、`quality`、`seed` |
-| `i2v` 图生视频 | `firstFrame` + `prompt`（带 `canvasId`/`nodeId` 且不给时取卡上的提示词） | `durationSec`（1–15，越界 400）、`resolution`(480p…4k，按模型目录)、`aspectRatio`、`audio`（缺省出声；只有用户明确要静音才传 `false`） |
+| `i2v` 图生视频 | `firstFrame` + `prompt`（带 `canvasId`/`nodeId` 且不给时取卡上的提示词） | `durationSec`（1–15；目录上限更长的模型可到其上限、最多 30，越界 400）、`resolution`(480p…4k，按模型目录)、`aspectRatio`、`audio`（缺省出声；只有用户明确要静音才传 `false`） |
 | `flf2v` 首尾帧生视频 | `firstFrame` + `lastFrame` + `prompt`（同 `i2v`，可取卡上的） | 同 `i2v` |
 | `ref2v` 参考生视频 | 顶层参考图 `referenceAssetIds`、参考视频 `referenceVideoAssetIds`、参考音频 `referenceAudioAssetIds` **至少一项**（只给参考音频须模型目录 `video.referenceAudioOnly: true`；带 `canvasId`/`nodeId` 时参考图可按画布边自动解析）+ `prompt`（同 `i2v`，可取卡上的）。张数 / 段数 / 合计 / 参考音视频时长上限**一律看目录 `video` 块**（`referenceImages` / `referenceVideos` / `referenceAudios` / `referenceTotal` / `referenceMediaMaxSec`），超出即被拒、不扣费 | 同 `i2v`、顶层 **`referenceAudioAssetIds`**（锁角色音色，见「角色音色一致性」章；加顶层 `referenceAudioMode: "fully_copy"` 则改为**原样复用这段音频当成片声音**，如唱用户的歌：仅 H3 全参考、恰好一段、≤15 秒，时长跟随音频）、顶层 **`referenceVideoAssetIds`**（动作/运镜参考，见「白模换角」章） |
 | `avatar` 数字人口播 | `drivingAudio` + （`firstFrame` 或 `motionVideo` 至少一个；或管理员的专属数字人 `digitalHumanId`，见下节） | `prompt`、`aspectRatio`（见下节） |
