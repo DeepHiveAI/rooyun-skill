@@ -14,6 +14,10 @@
 与新角色定妆照（顶层 `referenceAssetIds`）出片。**分工定死：参考视频只提供动作与运镜，
 参考图只提供长相**——两者各管一半，提示词里也按这个分工写。
 
+> 另一条路：用户要的是**场景、镜头全保留、只把人换掉**，且 `dj models --capability avatar` 里有
+> 「换人重演（保留原场景）」时，可直接用 `dj remake`（1–2 人，成片带**源视频原声**，不重新配音），用法见
+> [remake.md](remake.md)。白模换角则是换人又换场景、声音由 `ref2v` 重新生成。
+
 ### 三步流程（照抄即可）
 
 ```sh
@@ -21,7 +25,7 @@
 #    用户本地的片先上传（≤50MB；白模只要几何，先压到 720p 完全够用）
 SRC=$(dj upload ./ref.mp4 | jq -r '.data.assetId')
 
-# ② 转白模。按源片秒计价（约 0.03 积分/秒量级，8 秒片≈0.24 积分），先报价（纪律 1）：
+# ② 转白模。按源片秒计价（单价以 precheck 报价为准，实扣看 meta.credits），先报价（纪律 1）：
 BLOCKOUT_MODEL=$(dj models --capability blockout | jq -r '.data.models[0].id')
 dj precheck --model "$BLOCKOUT_MODEL" --capability blockout --params durationSec=8
 #    → 把「合计 X 积分 / 余额 Y」报给用户，等确认
@@ -73,7 +77,7 @@ dj task <taskId> --watch
 | 约束 | 数值 | 违反后果 |
 |---|---|---|
 | 参考视频只有 `ref2v` 吃 | — | 挂 `i2v` / `flf2v` / `avatar` 直接 400（别的链路不透传，放行=付了钱拿回一条无关的片） |
-| 段数上限 | 看目录 `video.referenceVideos`（如 Seedance 2.0 系 3 段、2.5 为 10 段），且与参考图、参考音频合计不超 `video.referenceTotal` | 超出即拒、不扣费，不会静默丢段 |
+| 段数上限 | 看目录 `video.referenceVideos`（各模型不同，先 `dj models --capability ref2v` 查），且与参考图、参考音频合计不超 `video.referenceTotal` | 超出即拒、不扣费，不会静默丢段 |
 | **模型必须声明参考视频能力** | — | 否则 400 `model_unsupported`。看 `dj models` 每条的「视频」行（`video.referenceVideos`）：`视频N` 为 0 的不能用 |
 | 必须是视频资产 | assetId | 图片 / 音频资产 → 400 |
 | 每段时长可确认、且不超模型上限 | 看该模型目录 | 时长取自资产真实字节（不收申报值）：解析不出 → 422 `asset_unresolved`；超上限 → 400，**先裁剪或拆镜** |

@@ -46,7 +46,8 @@ ops 是增量操作，重放到最新文档不会覆盖别人的改动——这�
 //    带上 scriptNodeId（剧本文本卡 id）与段的 shotNoStart/shotCount，卡上才有站内同款 shotOf 与组名：
 { "op": "createStoryboard", "params": { "kind": "video", "scriptNodeId": "n_剧本卡id", "sceneName": "老城区天台", "layout": "grouped",
     "shots": [{ "title": "镜01-02", "prompt": "<segments[].videoPrompt>", "durationSec": 7, "audio": true, "cast": ["林小满"], "props": [], "shotNoStart": 1, "shotCount": 2 }] } }
-//    ⚠️ 落整份分镜别自己拼这个批次：用 `dj storyboard-fall <canvasId> -f <storyboard响应.json> --script <剧本卡id>`
+//    导演式拆镜（dj storyboard-job）的结果按 director-storyboard.md「落卡映射」落：每个 segment 原样作一张卡。
+//    ⚠️ 旧 dj storyboard 的整份分镜别自己拼这个批次：用 `dj storyboard-fall <canvasId> -f <storyboard响应.json> --script <剧本卡id>`
 //    （按场次切批、空场景名兜底、超 30 段自动拆批，全在命令里）。等价的手写 jq 附在下面，
 //    只在你的宿主拿不到 dj.mjs 时才用它——jq 写错的表现是静默断链（卡都在、就是没参考）：
 //      printf '%s' "$SB" | jq -c --arg script "$SCRIPT_NODE" '.data.scenes[] | select(.segments | length > 0)
@@ -97,7 +98,7 @@ ops 是增量操作，重放到最新文档不会覆盖别人的改动——这�
 > 不会静默截断。
 
 ⚠️ **落卡上限 = 平台生成上限 8000 字，但个别模型线路更短**：`createStoryboard` 的 `shots[].prompt`
-与生成时的平台硬闸都是 **8000 字**；部分模型的上游线路只收 2000–5000 字（如可灵 o1 首尾帧 2000），
+与生成时的平台硬闸都是 **8000 字**；部分模型的上游线路只收得更短（具体上限以 400 报错里给出的数字为准），
 这时平台会改走放得下的同款线路，**都放不下就在扣费前 400**，报出上限与当前字数。
 分镜提示词写长了就先拆镜或精简——官方建议中文 ≤500 字，写太长模型反而容易丢细节。
 （服务端的提示词编译也按上限兜底：补段会顶破上限时它整段放弃，不会把你的请求撑爆。）

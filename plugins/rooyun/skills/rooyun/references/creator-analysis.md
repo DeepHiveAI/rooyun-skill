@@ -20,8 +20,10 @@ node scripts/dj.mjs creator-resolve "https://www.douyin.com/user/MS4wLjABAAAA...
 # ②' 向用户要 ≥2 条单条视频链接，逐条解析出 videoId
 node scripts/dj.mjs creator-resolve "https://v.douyin.com/xxxxx/" --pretty   # → data.video.videoId
 
-# ② 发起分析：点名 videoIds（默认等到终态；GPU 队列以分钟计，等半小时是正常的）
+# ② 先报价（不带 --yes 只报价，不扣费），把价格告诉用户、等确认
 node scripts/dj.mjs creator-analyze MS4wLjABAAAA... 7xxxxxxxxxxxxxxxxxx 7yyyyyyyyyyyyyyyyyy --pretty
+# ②'' 确认后加 --yes 发起分析：点名 videoIds（默认等到终态；GPU 队列以分钟计，等半小时是正常的）
+node scripts/dj.mjs creator-analyze MS4wLjABAAAA... 7xxxxxxxxxxxxxxxxxx 7yyyyyyyyyyyyyyyyyy --yes --pretty
 #   响应里的 skippedVideoIds = 你点名了但没进样本的，逐条带原因，要如实转告用户
 #   不想等：加 --no-wait，之后用 creator-analysis <jobId> 查
 

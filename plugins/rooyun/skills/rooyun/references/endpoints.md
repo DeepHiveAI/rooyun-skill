@@ -7,6 +7,12 @@
 
 `dj.mjs` 子命令 ↔ 端点 ↔ 所需 scope：
 
+> **报价凭证（服务端 2.59.0）**：所有 ★扣积分 的端点，报价（`dryRun:true`；generate 为 `precheck` 的 `items[i]`）都返回 `quoteId`，
+> 正式提交可带上它：参数与报价时不一致 → 409 `quote_mismatch`，过期（15 分钟）→ 410 `quote_expired`，本次金额超过报价 → 409；
+> 凭证只能用一次（服务端 2.61.0），再用 → 409 `quote_used`（重新报价；网络重试用原 `requestId` 重发）；
+> 令牌开了「花钱须先报价」（新建令牌默认开）时不带 → 428 `quote_required`。dj 的花钱命令正式提交前会自动先报价拿凭证再提交，
+> 也可 `--quote-id <id>` 显式带上。
+
 | 子命令 | 端点 | scope |
 |---|---|---|
 | `me` | `GET /api/v1/me` | 任何有效令牌 |
@@ -18,6 +24,8 @@
 | `digital-humans` | `GET /api/v1/digital-humans` | 任何有效令牌（**仅管理员有内容**，其余恒为空列表） |
 | `character-voices <canvasId>` | `GET /api/v1/canvases/{id}/character-voices` | `projects:read` |
 | `character-voices <canvasId> --bind/--unbind/-f` | `PUT /api/v1/canvases/{id}/character-voices` | `canvas:write` |
+| `voice-harvest <canvasId> --node <nodeId> --extraction <v2a taskId>` | `POST /api/v1/canvases/{id}/voice-harvest`（首镜定嗓，免费，不自动绑定） | `canvas:write` |
+| `trim <assetId> --start <秒> --end <秒>` | `POST /api/v1/assets/{id}/trim`（服务端裁剪音轨，免费） | `assets:write` |
 | `projects create <name>` | `POST /api/v1/projects` | `canvas:write` |
 | `projects list` | `GET /api/v1/projects` | `projects:read` |
 | `canvas list <projectId>` | `GET /api/v1/projects/{id}/canvases` | `projects:read` |
@@ -27,11 +35,15 @@
 | `canvas lint <canvasId> [--include-generated]` | `GET /api/v1/canvases/{id}/lint[?includeGenerated=1]` | `projects:read`（不扣积分） |
 | `node <canvasId> <nodeId>` | `GET /api/v1/canvases/{id}/nodes/{nodeId}` | `projects:read` |
 | `extract <kind> --script <path>` | `POST /api/v1/analyze/extract` | `llm` ★扣积分 |
-| `storyboard --script <path>` | `POST /api/v1/analyze/storyboard` | `llm` ★扣积分 |
+| `storyboard --script <path>` | `POST /api/v1/analyze/storyboard`（**已弃用**，保留 ≥30 天；改用 `storyboard-job`） | `llm` ★扣积分 |
+| `storyboard-job <剧本文件> [--canvas] [--video-model] [--aspect] [--yes]` | `POST /api/v1/storyboard-jobs`（不带 `--yes` = `dryRun:true` 只报价） | `llm` ★扣积分（按字数预收、结算退差额，见 [director-storyboard.md](director-storyboard.md)） |
+| `storyboard-job get <jobId> [--wait]` | `GET /api/v1/storyboard-jobs/{id}` | `llm`（免费重读） |
+| `adapt <小说文件> [--episode-sec] [--density] [--genre-guide] [--yes]` | `POST /api/v1/adaptations`（不带 `--yes` = `dryRun:true` 只报价） | `llm` ★扣积分（上限 `maxCredits`，按批结算） |
+| `adapt get <adaptationId> [--wait] [--out 目录]` | `GET /api/v1/adaptations/{id}` | `llm`（免费重读） |
 | `storyboard-fall <canvasId> -f <响应.json> [--script <剧本卡id>]` | `POST /api/v1/canvases/{id}/ops`（每场一批 createStoryboard） | `canvas:write` |
 | `rewrite <mode> --text …` | `POST /api/v1/analyze/rewrite` | `llm` ★扣积分 |
-| `caption image\|video …` | `POST /api/v1/analyze/caption` | `llm` ★扣积分（图片 0.1/次、视频 0.1/秒） |
-| `inspect <assetId> …` | `POST /api/v1/analyze/inspect` | `llm`（不扣积分） |
+| `caption image\|video …` | `POST /api/v1/analyze/caption` | `llm` ★扣积分（图片按次、视频按秒；实扣看 `meta.credits`） |
+| `inspect <assetId> …` | `POST /api/v1/analyze/inspect` | `llm` ★扣积分（按次，失败退回） |
 | `agents` | `GET /api/v1/agents` | 任何有效令牌 |
 | `chat new --agent <id>` | `POST /api/v1/conversations` | `llm`（建会话不扣积分） |
 | `chat send <id> --request-id <uuid> "…"` | `POST /api/v1/conversations/{id}/messages` | `llm` ★扣积分（每轮） |
@@ -45,6 +57,7 @@
 | `edit-session revoke <sessionId>` | `DELETE /api/v1/edit-sessions/{id}` | `canvas:write` |
 | `precheck` | `POST /api/v1/generations/precheck` | `generate` |
 | `generate` | `POST /api/v1/generations` | `generate` |
+| `remake --source … --keyframe … [--yes --request-id <uuid>]` | `POST /api/v1/remakes`（不带 `--yes` = `dryRun:true` 只报价；查询走 `GET /api/v1/generations/{taskId}`） | `generate` ★扣积分（见 [remake.md](remake.md)） |
 | `task <taskId> [--watch]` | `GET /api/v1/generations/{taskId}` | `tasks:read` |
 | `tasks [--status active\|all] [--canvas <id>] [--request <id>]` | `GET /api/v1/generations` | `tasks:read` |
 | `cancel <taskId>` | `POST /api/v1/generations/{taskId}/cancel` | `generate` |
@@ -54,9 +67,9 @@
 | `wallet` / `ledger` | `GET /api/v1/billing/wallet`、`/ledger` | `billing:read` |
 | `creator-resolve <链接或口令>` | `POST /api/v1/creators/resolve` | `creators:read` |
 | `video-url <链接或口令>` | `POST /api/v1/creators/resolve`（请求体 `withPlayUrl: true`） | `creators:read` |
-| `creator-analyze <secUid> <videoId> <videoId> …` | `POST /api/v1/creator-analyses` | `creators:read`（**videoIds 必须点名**，见纪律 15） |
+| `creator-analyze <secUid> <videoId> <videoId> … [--dry-run \| --yes]` | `POST /api/v1/creator-analyses`（不带 `--yes` = `dryRun:true` 只报价） | `creators:read` ★扣积分（**videoIds 必须点名**，见纪律 15） |
 | `creator-analysis <jobId>` | `GET /api/v1/creator-analyses/{id}` | `creators:read` |
-| `reference-analyze (<链接或口令或视频id> \| --asset <assetId>) [--out account.json] [--timeline-md TIMELINE.md]` | `POST /api/v1/reference-decompositions`（提交后默认等到终态）；`--asset` 拆资产库里的视频（自己的成片） | `creators:read` ★扣积分（0.1/秒，含后续改编） |
+| `reference-analyze (<链接或口令或视频id> \| --asset <assetId>) [--dry-run \| --yes] [--out account.json] [--timeline-md TIMELINE.md]` | `POST /api/v1/reference-decompositions`（不带 `--yes` = `dryRun:true` 只报价；`--yes` 提交后默认等到终态）；`--asset` 拆资产库里的视频（自己的成片） | `creators:read` ★扣积分（按源视频秒计，含后续改编） |
 | `reference-analysis <jobId>` | `GET /api/v1/reference-decompositions/{id}` | `creators:read` |
 | `reference-frames <jobId> (--shot\|--shots\|--range\|--around)` | 读一次 `GET /api/v1/reference-decompositions/{id}` + `POST /creators/resolve`，**抽帧在你本机跑**（ffmpeg） | `creators:read` |
 | `reference-adapt <jobId> --presenter … --product …` | `POST /api/v1/reference-decompositions/{id}/adaptations` | `generate`（不另收费，含在拆解价内） |
@@ -143,7 +156,7 @@ dj canvas structure "$CANVAS" | jq -r '.data.nodes[] | select(.title=="镜1 推�
 | `precheck` | `{enabled, total, balance, available, ok, items: [{credits, priced}]}` — `available` 才是本批可用（含赠送积分），`balance` 只是充值积分 |
 | `generate` | `{taskId, status, canvasId?, nodeId?, heldCredits?}` + `meta{resolvedReferences?, promptSource?, promptCompile?, warnings?}` — **之后查询、取消都用 `taskId`**（不是你生成的 requestId）。`promptSource` 只在没给 `params.prompt`、服务端改用目标卡上的提示词时出现。`heldCredits` 是**冻结额**（最多花这么多），不是实扣。**`meta` 里那三位都要看**：`resolvedReferences` 是服务端替你填的参考及来源（逐条核对）；`promptCompile.applied` 是平台补了哪几段提示词（没有这一位=一个字都没动）；**`warnings` 是「提示词点了某个设定板的名字，但这张卡没连它」**——不阻断提交，但十有八九就是「人物每镜换脸」那个事故，看到就该停下来改边而不是等出片 |
 | `tasks` | `{tasks: [{taskId, status, capability, requestId?, canvasId?, nodeId?, assetId?, createdAt, updatedAt}]}` + `meta{total, limit, offset}` — **状态丢了就用它**：缺省只列在途（`--status all` 看历史），可按 `--canvas` / `--request` 过滤。⚠️ `status` 是**库里的快照、不轮询上游**，可能滞后——要准确状态（以及触发终态落卡）仍要逐条 `dj task <taskId>`。`requestId` 是你提交时的幂等键，拿它和自己的记录对上号 |
-| `task` | `{taskId, status, progress?, assetId?, error?, capability, canvasId?, nodeId?, landedTo, chargedCredits?, cancelRequested?, prompts?}` + `meta{pollAfterMs}` — **终态的 `chargedCredits` 才是实扣**，收尾汇报逐笔累加它。`prompts.applied` 是**平台补了哪几段**的段名（与提交回执 `meta.promptCompile.applied` 同源）；`prompts.submitted`（你提交的原文）**只在两种情况下回显**：提交时传了 `promptCompile:"off"`，或平台一段都没补（`prompts.applied` 为空）——其余情况只回段名、不回编译后的全文，要逐字可控就传 `off`（原文本就在你手里）。**没有编译记录的老任务两位都不回显**。`prompts.final` 只在走**图片改写链路**时出现，视频链路恒缺席——别拿它判断「平台改没改」 |
+| `task` | `{taskId, status, progress?, assetId?, error?, capability, canvasId?, nodeId?, canvasUrl?, landedTo, chargedCredits?, cancelRequested?, prompts?}` + `meta{pollAfterMs}` — **终态的 `chargedCredits` 才是实扣**，收尾汇报逐笔累加它。`canvasUrl` 是可直接在浏览器打开的画布地址（只在定向落卡且画布仍在时出现），汇报产物时可原样给用户。`prompts.applied` 是**平台补了哪几段**的段名（与提交回执 `meta.promptCompile.applied` 同源）；`prompts.submitted`（你提交的原文）**只在两种情况下回显**：提交时传了 `promptCompile:"off"`，或平台一段都没补（`prompts.applied` 为空）——其余情况只回段名、不回编译后的全文，要逐字可控就传 `off`（原文本就在你手里）。**没有编译记录的老任务两位都不回显**。`prompts.final` 只在走**图片改写链路**时出现，视频链路恒缺席——别拿它判断「平台改没改」 |
 | `chat new` | `{conversation: {conversationId, agentId, modelId, title, kind, createdVia, createdAt, updatedAt, lastSeq}}` + `meta{billingUnit, stagesPerTurn, perRoundCredits, estimatedTurnCredits}` — **`conversationId` 就是这段创作的全部状态**，存进你的「任务 → conversationId」表。建会话不扣钱，但 **`meta.estimatedTurnCredits` 就是下一轮的报价**（`null` = 该模型未配价、发轮会被 503 拒，**不是免费**） |
 | `chat send` | `{messageId, seq, text, status, artifacts[], usage, credits, createdAt}` + `meta{billingUnit, stagesPerTurn, replayed?}` — 产物型 Agent 的稿件在 `artifacts[]`：`{kind, roundId?, artifactId?, phase?, summary?, error?, variants:[{variantId:"a"\|"b", artifactId, text?}]}`，**`text` 是稿件全文**（读不回来时该稿只是没有 `text` 字段，不是空串）。`usage` / `credits` 为 `null` 是产物型的常态（多阶段各自扣分，门面拿不到聚合金额，**不等于免费**——去 `ledger` 对账）。`meta.replayed:true` = 同 `requestId` 的幂等重放，**本次未扣费** |
 | `chat history` | `{messages: [{seq, role, text, artifacts[], createdAt}]}` + `meta{limit, afterSeq?, count, lastSeq}` — `seq` 游标严格大于 `afterSeq`；下次增量拉取传 `meta.lastSeq`。内部消息（幂等标记、作废行）不出现在这里 |
@@ -158,7 +171,7 @@ dj canvas structure "$CANVAS" | jq -r '.data.nodes[] | select(.title=="镜1 推�
 | `video-url` | 与 `creator-resolve` 同构，但每条视频多一个 `playUrl`（视频直链，裸 `curl -L` 可下）。**主页分支当前拿不到列表**（上游封锁），只有单条视频链接可用 |
 | `creator-analyze` | `{jobId, status:"queued", sampleVideoIds[], skippedVideoIds?:[{videoId,reason}], statusUrl}`；命中幂等时 `{jobId, status, deduplicated:true}`。`skippedVideoIds` = 你点名了但没进样本的，要如实转告用户 |
 | `creator-analysis` | `{jobId, secUid, status, videos:[{videoId, phase, gpuStage?, failedStage?, failedCode?, error?}], succeededVideoIds[], error?, createdAt, updatedAt}` + `meta{total,succeeded}`。`gpuStage` queued=还在 GPU 队列排队 / processing=已在处理；`failedStage` 说明死在哪一步（resolve/enqueue/queue/gpu/analysis）；`failedCode` 说明为什么死并决定处置：`upstream_server_error`/`upstream_unreachable` 换模型或稍后再来 · `upstream_auth`/`analysis_not_configured`/`gpu_unconfigured` 找管理员（重试无用）· `upstream_rate_limited` 退避重试 · `upstream_unparsable` 直接重试 · `gpu_queue_timeout` 队列拥堵 · `gpu_inference_timeout` 推理超时 · `job_expired` 整单超龄 |
-| `reference-analyze` | 提交回执 `{jobId, status:"queued", videoId, statusUrl, credits, billedSec}`（幂等命中 `{jobId, status, deduplicated:true}`，**不扣费**）；默认等到终态后 stdout 是 `reference-analysis` 的信封。**计费**：0.1 积分/秒 × 源视频时长（服务端取可信时长，向上取整秒，上限 600 秒），建任务前一次扣清，`credits` 实扣、`billedSec` 计费秒数；任务 `failed` 自动全额退款；排队已满 409 `reference_job_active` 不扣费；同一条拆解的后续改编（`reference-adapt`，单条最多 20 份）**不另收费**。余额 / 令牌限额不足 → 402；读不出时长（如图文笔记）→ 400；未配价 → 503 `service_unavailable`。**发起前先按「时长 × 0.1」向用户报价并等确认** |
+| `reference-analyze` | 提交回执 `{jobId, status:"queued", videoId, statusUrl, credits, billedSec}`（幂等命中 `{jobId, status, deduplicated:true}`，**不扣费**）；默认等到终态后 stdout 是 `reference-analysis` 的信封。**计费**：按源视频时长逐秒计（单价随平台价目调整、与网页端同价；服务端取可信时长，向上取整秒，上限 600 秒），建任务前一次扣清，`credits` 实扣、`billedSec` 计费秒数；任务 `failed` 自动全额退款；排队已满 409 `reference_job_active` 不扣费；同一条拆解的后续改编（`reference-adapt`，单条最多 20 份）**不另收费**。余额 / 令牌限额不足 → 402；读不出时长（如图文笔记）→ 400；未配价 → 503 `service_unavailable`。**发起前先向用户说明「按源视频 N 秒计费、以回执 `credits` 实扣为准」并等确认** |
 | `reference-compare` | `{referenceJobId, candidateJobId, comparison}`。**复刻验收**（纯计算不花钱）：成片先 `reference-analyze --asset <assetId>` 拆一遍，再与参考片 diff。`comparison.functionSequence.missing` = 参考片有、成片一次都没出现的功能（**最该看的一行**，丢了 proof 就是漏了证据环节）· `agreement` = LCS 对齐数 ÷ 参考片段数 · `preserveKept[].status:"dropped"` = 参考片标必保、成片没当回事的维度 · `verdict` 只是提示**不是门禁**（只比结构，不比观感画质）。两边都要 succeeded，否则 409 |
 | `reference-template` | `{template, samples[], skipped?}`。**纯计算、不花钱**：2–12 条已 succeeded 的拆解 → 赛道结构模板。`template.pattern` 骨架（`escalate+` = 多数样本里连续好几段）· `steps[].support` 每环节在多少比例样本里出现（**< 1 才有信息量**，如 `cta 0.67` = 三条里一条不带 CTA）· `functionMix` 各功能占比 · `preserveConsensus` 各维度被标「换掉就垮」的段占比 · `avgSegmentCount/avgDurationSec`。未 succeeded 的样本列在 `skipped` 不静默少算；可用样本 < 2 → 400 |
 | `reference-adapt` | `{jobId, adaptation, diagnostics?, deduplicated?}`。**同步**（十几到几十秒），scope `generate`。`adaptation.segments[]` 与参考片一一对应：`index/sourceIndex/function/intent` 由服务端回填（结构不许动）、`dialogue`/`visualBrief` 是新写的、`conflicts[]` 是「你要换但这一段标了必保、所以没换」的维度（`conflictCount` 给段数）。**先看 `adaptation.verdict`**：`strained` = 至少一个维度过半的段都拒绝更换，产物必是自相矛盾的混合稿，别用——`warnings[]` 点名维度，`dimensionOutcomes[]` 给逐维度落点（换了几段/被拒几段/拒绝率）；处置是换一条对标片或去掉那个维度。`diagnostics.fallbackIndices` = 模型漏写按原片兜底的段号。拆解未 succeeded 或改编数超 20 → 409。带 `requestId` 幂等（`deduplicated:true` 时**没打上游、没花钱**）。`--script-md` 直接出可粘进剧本卡的分段文案 |
@@ -169,8 +182,8 @@ dj canvas structure "$CANVAS" | jq -r '.data.nodes[] | select(.title=="镜1 推�
 | `extract` | 按 `kind` 判别：`{kind:"characters", characters:[…]}` / `{kind:"scenes", scenes:[…]}` / `{kind:"props", props:[…]}` + `meta{modelId,creditRef,credits,billingUnit,usage}` |
 | `storyboard` | `{visualTone, newCast[], scenes:[{name,time,inOut,emotionArc,shots:[…], segments:[{shotNoStart,shotNoEnd,durationSec,title,videoPrompt,cast[],props[],audio,lint:{version,error,warn,info,codes[]}}]}]}` + 同上 `meta`。`lint` 是该段的编译后机检摘要（只记录不拦截）：`error>0` 先按 codes 回 ③ 修分镜再落卡，`warn` 酌情，`info` 可忽略。`segments` 是平台同款打包+编译的建议段：**整段原样传给 `createStoryboard kind:"video"`**（`videoPrompt`→`prompt`；多镜含硬切指令与镜头时长，对白在「音轨：」行内一字不丢；`cast`/`props` 是段内并集、`audio` 是段内有无音轨），自拼提示词曾导致全片对白静默丢失。**调用时务必传 `appearanceAnchors`**（`--anchors`：把 extract 的 `shotInjection` 映射成 `[{name,anchor}]`），否则模型每镜重新想象角色长相 |
 | `rewrite` | `{mode, text}` + 同上 `meta` |
-| `caption` | `{kind:"image", text}` 或 `{kind:"video", prompt, scope?, slots?, warnings?}` + `meta{modelId,promptVersion,billingUnit,credits,creditRef,mock?}`。**扣积分**（与网页端同价）：图片 `billingUnit:"per_call"` 0.1 积分/次；视频 `"per_second"` 0.1 积分/秒，计费时长 = max(`durationSec`, 末帧时刻) 向上取整秒，上限 600 秒。上游失败 / 产物不可用自动退款（失败响应 `credits` 报 0，`creditRef` 供对账）；mock 演示产物不扣费。余额 / 令牌限额不足 → 402（`insufficient_credits` / `token_limit_exceeded` / `token_daily_limit_exceeded`）；未配价 → 503 `service_unavailable`。**调用前先报价** |
-| `inspect` | `{verdict, checks:[{dimension,verdict,reason,basis?}], advice?, judge{modelId,promptVersion}}` + `meta{modelId,promptVersion,billingUnit:"free",credits:0,mock?}`（**不扣积分**，但受 `llm` scope 与视觉桶限流约束） |
+| `caption` | `{kind:"image", text}` 或 `{kind:"video", prompt, scope?, slots?, warnings?}` + `meta{modelId,promptVersion,billingUnit,credits,creditRef,mock?}`。**扣积分**（与网页端同价）：图片 `billingUnit:"per_call"` 按次计；视频 `"per_second"` 按秒计（单价随平台价目调整，实扣以 `meta.credits` 为准），计费时长 = max(`durationSec`, 末帧时刻) 向上取整秒，上限 600 秒。上游失败 / 产物不可用自动退款（失败响应 `credits` 报 0，`creditRef` 供对账）；mock 演示产物不扣费。余额 / 令牌限额不足 → 402（`insufficient_credits` / `token_limit_exceeded` / `token_daily_limit_exceeded`）；未配价 → 503 `service_unavailable`。**调用前先报价** |
+| `inspect` | `{verdict, checks:[{dimension,verdict,reason,basis?}], advice?, judge{modelId,promptVersion}}` + `meta{modelId,promptVersion,billingUnit:"per_call",credits,creditRef,mock?}`（**按次扣积分**，与网页端同价；调上游前扣、上游失败或判定解析失败自动退回，实扣看 `meta.credits`；`mock` 演示产物不扣费；受 `llm` scope 与视觉桶限流约束） |
 | `edit-session create` | `{sessionId, url, expiresAt, capability, canvasId, nodeId, sourceAssetId, status:"pending"}` |
 | `edit-session status` / `revoke` | `{sessionId, status, capability, canvasId, nodeId, sourceAssetId, expiresAt, createdAt, result?}`；`result`（仅 submitted）`= {maskAssetId, resultAssetId, instruction, submittedAt}` |
 
@@ -264,7 +277,7 @@ TIER=$(echo "$ROW" | jq -r '(.video.resolutions // .image.sizes) as $ok | (.pric
 要贴纸、角色立绘、道具素材这类**能直接叠到别的画面上**的图，就给 `t2i` 传
 `params.transparentBackground: true`，产物是带 alpha 通道的透明底 PNG。
 
-生产实测（2026-09-23，Qwen-Image-2.1，1K）：产物 1328×1328、PNG 色彩类型 6（RGBA），
+生产实测示例（2026-09-23，当时的一个自建 GPU 图片模型，1K；哪些模型支持以目录为准）：产物 1328×1328、PNG 色彩类型 6（RGBA），
 完全透明像素 28.9%、半透明 46.3%（毛发与抗锯齿边缘）、不透明 24.8%——是真透明底，
 不是「有 alpha 通道但整幅不透明」。
 
@@ -356,6 +369,24 @@ dj generate --request-id "$(uuidgen | tr 'A-Z' 'a-z')" --model "$MODEL" \
 - `durationSec` / `resolution` / `audio` 对它**无效**（时长由配音定、无清晰度档、
   产物必带配音音轨）；`aspectRatio` 只对「肖像 + 配音」这一版生效。
 - 预检报价给个估计的 `durationSec`（≈ 配音秒数）即可，实扣以服务端测得的为准。
+- **avatar 下各模型的必填素材不完全相同**，上面是口播的常规用法；选模型前先读
+  `dj models --capability avatar` 里每条的 `description`，以它和 400 报错为准。
+
+#### 换人重演（保留原场景，avatar 粒度的一个模型）
+
+> 优先用专用命令 `dj remake`（`POST /v1/remakes`，1–2 人、关键帧规则与站内一致、默认只报价），完整用法见 [remake.md](remake.md)。
+> 下面是直接用 `avatar` 粒度提交的旧写法（只支持 1 人、一张参考帧）。
+
+`dj models --capability avatar` 里出现「换人重演（保留原场景）」时可用：把一段现成视频里的人换成你的角色，
+场景、动作、镜头都保留。
+
+- 素材：`params.motionVideo` = 源视频，`params.firstFrame` = 参考帧（源视频某一帧画成目标角色后的整帧图，
+  开放 API 只收**一张**），`prompt` 必填。**不收配音**：带 `params.drivingAudio`、尾帧或其他参考素材会被拒。
+- **成片用源视频的原声**（OpenAPI 2.56.0 起，按成片帧数截齐），不是配音，也不是模型重建的声音。
+  用户要换台词 / 换嗓子，得出片后另配（t2a + 本地合成，见 [local-compose.md](local-compose.md)），
+  别指望这一步改声音。
+- 时长由源片决定（最长截前 14 秒，太短会被拒），`durationSec` 不用传、传了也不算数；
+  `precheck` 按源片真实时长报价，以它为准。
 
 #### 专属数字人（仅管理员）
 

@@ -1,8 +1,8 @@
 ---
 name: rooyun
-version: 1.60.1
+version: 1.62.1
 releasedAt: 2026-11-19
-description: 用自然语言驱动 RooYun（短剧 AI 创作工作台）的开放 API：建项目与无限画布、按「剧本 → 角色/场景/道具 → 分镜视频卡 → 生成」的固定顺序搭画布、用平台 LLM 把剧本拆成结构化的角色/场景/道具/分镜再落成卡片、调模型生成图片视频音频并自动落回卡片、把一段现成视频转成白模再让新角色复刻它的动作与运镜、反推参考素材的提示词、质检分镜图、下载产物到本地、把抖音视频分享链接解析成可直接下载的视频直链，供本地看片做对标分析；以及选题情报一条链：读每日频道简报（选题 + 「AI 数字人做不做得了」的可执行性判断 + 对标参考）、订阅对标博主并按增速看谁在起来、查热榜与每日选题报告、检索文案库看别人的爆款是怎么写的（钩子/段落节奏/CTA）。当用户说「用 RooYun 生成分镜 / 把我的剧本做成视频工程 / 拆一下这个剧本的角色 / 在 RooYun 里建个项目 / 把这段视频换成我的角色重演 / 下载我 RooYun 项目的产物 / 查我 RooYun 还剩多少积分 / 帮我把这条抖音视频下下来看看 / 抓一下这个抖音博主的视频 / 今天做什么选题 / 帮我盯着这几个对标博主 / 别人这条爆款是怎么写的 / 看看今天的选题简报」，或提到 RooYun、rooyun.com、ROOYUN_API_TOKEN 时使用本技能。生成类会花用户的真钱，任何生成前必须先报价并等用户确认；选题情报那条链全部只读、不扣积分。
+description: 用自然语言驱动 RooYun（短剧 AI 创作工作台）的开放 API：建项目与无限画布、按「剧本 → 角色/场景/道具 → 分镜视频卡 → 生成」的固定顺序搭画布、用平台 LLM 把小说改成分集剧本、把剧本按导演式拆镜拆成结构化的角色/场景/道具/分镜再落成卡片、调模型生成图片视频音频并自动落回卡片、把一段现成视频里的 1–2 个人换成你的角色重演（保留场景与原声）、把一段现成视频转成白模再让新角色复刻它的动作与运镜、把一整件多步创作任务委托给站内画布创作助手（花钱的每一步仍由用户逐项批准）、反推参考素材的提示词、质检分镜图、下载产物到本地、把抖音视频分享链接解析成可直接下载的视频直链，供本地看片做对标分析；以及选题情报一条链：读每日频道简报（选题 + 「AI 数字人做不做得了」的可执行性判断 + 对标参考）、订阅对标博主并按增速看谁在起来、查热榜与每日选题报告、检索文案库看别人的爆款是怎么写的（钩子/段落节奏/CTA）。当用户说「用 RooYun 生成分镜 / 把我的剧本做成视频工程 / 拆一下这个剧本的角色 / 在 RooYun 里建个项目 / 把这段视频换成我的角色重演 / 换人重演 / 把这本小说改成剧本 / 小说改剧本 / 导演式拆镜 / 下载我 RooYun 项目的产物 / 查我 RooYun 还剩多少积分 / 帮我把这条抖音视频下下来看看 / 抓一下这个抖音博主的视频 / 今天做什么选题 / 帮我盯着这几个对标博主 / 别人这条爆款是怎么写的 / 看看今天的选题简报」，或提到 RooYun、rooyun.com、ROOYUN_API_TOKEN 时使用本技能。生成类会花用户的真钱，任何生成前必须先报价并等用户确认；选题情报那条链全部只读、不扣积分。
 ---
 
 # RooYun 开放 API
@@ -20,26 +20,30 @@ RooYun 是「无限画布 + AI Agent」的短剧创作工作台。你通过 v1 �
 | 能力 | 说明 |
 |---|---|
 | 搭工程 | 建项目/画布，建角色设定板、场景卡、道具板、分镜视频卡（站内「提取分镜」同款：一段一卡 + 本场引用坞 + 成组），连线/断线，改卡，自动布局 |
-| 读剧本出结构 | 剧本 → 角色/场景/道具（带完整字段）、剧本 → 分镜（一镜十几个字段）。**只返数据不落卡**，改完用 ops 回写 |
+| **导演式拆镜** | 剧本 → 设定（角色/场景/道具）+ 场 → 片段 → 镜的分镜（站内「拆镜头」同一条流水线）：`dj storyboard-job`，★收费、默认只报价，异步作业。**只返数据不落卡**，按 [`references/director-storyboard.md`](references/director-storyboard.md) 的映射用 ops 落卡。旧 `dj storyboard` 已弃用 |
+| **小说改剧本** | 小说 txt → 分集剧本（`dj adapt`，★收费、默认只报价，异步作业；自动在写作台建小说 + 剧本文稿），`adapt get --out` 逐集落盘后再逐集导演式拆镜 |
+| 读剧本出结构 | 只要角色/场景/道具（带完整字段）时用 `dj extract`。**只返数据不落卡**，改完用 ops 回写 |
 | 加工文案 | 按要求改写、口语描述转电影级生图提示词、中译英、给剧情写主题曲歌词 |
 | **多轮 Agent 会话** | 跟目录里的 Agent（萌宠文案、剧本医生…）开一段**服务端持有历史**的会话：每轮只发新的一句话，拿回 A/B 双稿全文，指定其中一稿继续改（见「多轮 Agent 会话」章，纪律 13） |
+| **委托创作助手** | 把多步的画布创作（从剧本搭整套画布、按分镜批量出图出片）整件交给站内画布创作助手：`dj agent-run start`，助手在画布上读卡、搭卡、写提示词，花钱的每一步停下来等**用户本人逐项批准**（缺省只出计划）。原子命令留给精修（见「委托模式」章，[`references/agent-runs.md`](references/agent-runs.md)） |
 | 读素材出提示词 | 参考图 → 画面描述；参考片（自己抽好的 2–8 帧）→ 完整镜头脚本 |
 | 质检产物 | 判分镜图有没有崩坏、人物像不像定妆照、拍出来是不是导演要的 |
 | 读画布 | 读整张结构（总览，含每张卡的落位坐标），或详读单卡（正文全文 + 可写参数 + 上下游 + 多版产物；存量分镜表卡另出全部行） |
 | 管产物版本 | 同一张卡生成多次会攒成一排可选版本：详读看 `versions[]`，`adoptVersion` 换用其中一版；`attachAsset` 把资产库里的产物绑回空卡 |
 | 生成内容 | 文生图 / 图生图 / 图生视频 / 首尾帧 / 参考图生视频 / 数字人口播 / 配音 / 音乐 / 音效 / 视频高清 / 视频抽音轨 / 视频转白模，**产物自动落回你指定的卡片** |
+| **换人重演** | 把一段现成视频里的 1–2 个人换成你的角色，场景 / 动作 / 运镜全保留、**成片用原声**：先自己画好参考帧（t2i + 源帧 + 角色图），再 `dj remake`（★收费、默认只报价），查进度用 `dj task`（见 [`references/remake.md`](references/remake.md)） |
 | **白模换角** | 拿一段现成视频（用户上传的原片、或画布上已生成的片）转成深度粘土白模，再让新角色复刻它的动作、走位与运镜：`blockout` 出白模片 → `ref2v` 带参考视频 + 新角色定妆照出片（见「白模换角」章） |
 | 请用户搭把手 | 撞上「只有人能指」的步骤（局部重绘要涂哪一块）时，签一条免登录编辑链接给用户，他涂完你取回蒙版接着做 |
 | 局部重绘 | 拿蒙版只重画选中的那一块（`t2i` + 源图 + `params.mask`），其余像素锁定不变 |
 | 挑音色 | 查音色目录（系统音色 + 用户自己的克隆/设计音色），配音前先挑嗓子 |
 | 专属数字人（仅管理员） | 管理员登记的专属数字人出口播：`dj digital-humans` 取 id → `avatar` 带 `params.digitalHumanId` + 配音，形象图不用传；非管理员列表恒为空（见 [`references/endpoints.md`](references/endpoints.md)「专属数字人」节） |
-| **锁角色音色** | 试镜定嗓闭环：试镜卡（`createCard auditionOf`）→ 抽人声轨 → 绑到角色 → 对白镜头走 `ref2v` + `--canvas/--node` 时服务端自动注入参考音频（回执 `meta.voiceSamples` 核对），同一角色全剧一把嗓子（见「角色音色一致性」章，对白剧必读） |
+| **锁角色音色** | 首镜定嗓（先出一段对白正片 → `dj voice-harvest` 从成片切各角色样本 → 试听确认后绑定），未过质量闸的角色走试镜定嗓闭环：试镜卡（`createCard auditionOf`）→ 抽人声轨 → 绑到角色 → 对白镜头走 `ref2v` + `--canvas/--node` 时服务端自动注入参考音频（回执 `meta.voiceSamples` 核对），同一角色全剧一把嗓子（见「角色音色一致性」章，对白剧必读） |
 | 传素材 | 上传本地图片/视频/音频换 `assetId`，之后可当首帧、参考图、图生图源图 |
 | 取产物 | 列资产、批量下载、完整性核对 |
 | 查账 | 钱包余额、账单流水、本令牌已烧多少额度 |
 | 拆解对标博主 | 解析抖音分享链接 → 发起深度分析 → 读账号画像（赛道/受众/叙事骨架/风格雷达/标题公式）与**可直接仿写的提示词**、逐条视频报告与 ASR 转写全文；需要原片还能转存进资产库 |
 | **拿抖音视频到本地** | 粘一条抖音**单条视频**链接 → 拿到视频直链 → `curl` 下到本地自己看片/分析（不转存、不花钱。主页链接当前拿不到列表，见纪律 15） |
-| **拆解一条参考视频** | 粘一条抖音**单条视频**链接 → 平台切镜抽帧 + 转写 → 出逐镜头的「分段实现账」：每镜的叙事功能（hook/setup/escalate/turn/proof/cta/close）、对观众做了什么、复刻时哪些维度能换/必保、画面具体做了什么。这是「看懂一条爆款并拆成可执行方案」的第一步，约 5–15 分钟异步；**扣积分：0.1 积分/秒 × 源视频时长**（后续改编不另收费，失败自动退款），发起前先报价。拿到账本后用 `dj reference-frames <jobId> --shots …` **在本机抽帧亲眼复核**（账本的 `visual` 是模型说的，帧预算覆盖不到所有镜头）（见「参考视频拆解」章，[`references/reference-video.md`](references/reference-video.md)） |
+| **拆解一条参考视频** | 粘一条抖音**单条视频**链接 → 平台切镜抽帧 + 转写 → 出逐镜头的「分段实现账」：每镜的叙事功能（hook/setup/escalate/turn/proof/cta/close）、对观众做了什么、复刻时哪些维度能换/必保、画面具体做了什么。这是「看懂一条爆款并拆成可执行方案」的第一步，约 5–15 分钟异步；**按源视频时长逐秒扣积分**（单价随平台价目调整，实扣看回执 `credits`；后续改编不另收费，失败自动退款），发起前先报价。拿到账本后用 `dj reference-frames <jobId> --shots …` **在本机抽帧亲眼复核**（账本的 `visual` 是模型说的，帧预算覆盖不到所有镜头）（见「参考视频拆解」章，[`references/reference-video.md`](references/reference-video.md)） |
 | **爆款复刻 → 剪映草稿** | 粘一条抖音单条视频 → `dj video-analyze` 出站内「爆款复刻」同款蓝图（★收费，先 `--quote` 报价）→ `dj recreate` 一次落成整套卡（免费、不生成）→ 报价确认后出片 → `download.mjs --jianying` 导出剪映草稿（见「复刻 → 出片 → 导出剪映」章） |
 | **复刻验收** | 片子做完别只凭感觉说「像」：把自己的成片按同一套管线拆一遍（`dj reference-analyze --asset <assetId>`），再 `dj reference-compare <参考片jobId> <成片jobId>` 出结构 diff——**参考片有、成片一次都没出现的功能**（丢了 proof 就是漏了证据环节）、必保维度有没有保住。纯计算不花钱；判定只是提示**不是门禁**（只比叙事结构，不比观感画质），成片仍要你亲自看完 |
 | **赛道结构模板** | 拆过 2–12 条同赛道的片子后，`dj reference-template <jobId> …` 归纳共性：骨架序列、每个环节的出现率（`cta 0.67` = 三条里一条不带 CTA）、功能组成占比、各维度「换掉就垮」的共识。纯计算不花钱 |
@@ -49,8 +53,8 @@ RooYun 是「无限画布 + AI Agent」的短剧创作工作台。你通过 v1 �
 
 做不到的（不要假装能做）：实时协同、操作导演台 3D 场景 / 配方 / 编组、
 缩放已有卡片（`moveCard` 只挪位置，改不了宽高）、
-调用**编排型** Agent（画布助手一类，`conversational: false`——它们要在画布里跑；
-纯对话与产物型 Agent 已经可以开会话，见「多轮 Agent 会话」章）、
+用会话接口调用**编排型** Agent（`conversational: false`——它们要在画布里跑；
+纯对话与产物型 Agent 可以开会话，见「多轮 Agent 会话」章；画布创作助手走委托模式 `dj agent-run`，见「委托模式」章）、
 删除或覆盖已上传的资产（内容寻址的对象不可变）、
 分析**没在本账号分析过**的博主的既有产物（读端点有归属门槛，见「博主分析」一节）。
 
@@ -154,6 +158,18 @@ node scripts/dj.mjs precheck -f /tmp/batch.json --pretty
 **链式生成要报两次价**：「分镜出视频」是 `t2i` → `i2v` 两段，第二段的 `firstFrame`
 要等第一段的产物出来才有 assetId，没法和第一段一起预检。诚实做法是一开始就告诉用户
 「这活儿分两步，我会报两次价」，而不是报完第一段就默默把第二段也做了。
+
+**报价凭证 `quoteId`**：所有花钱端点的报价都带 `quoteId`（generate 是 precheck 的 `items[i].quoteId`，
+拆镜 / 换人 / 改编 / 视频分析 / 博主分析 / 参考拆解 / analyze/* / 会话发轮是 `dryRun:true` 的回执）。
+用户确认后带 `quoteId` 原样提交：参数与报价时不一致 → 409 `quote_mismatch`，过期（15 分钟）→ 410 `quote_expired`，
+本次金额超过报价 → 409——都要**重新报价、重新确认**；**凭证只能用一次**，再用 → 409 `quote_used`
+（网络重试用原 `requestId` 重发即拿回原结果）；令牌开了「花钱须先报价」（新建令牌默认开）时
+不带 `quoteId` 直接 428 `quote_required`。dj 的花钱命令带 `--yes` 时会自动先报价拿凭证再提交，不带 `--yes` 只报价。
+
+**委托创作助手的待批项同样受本条约束**（`dj agent-run`，见「委托模式」章）：**批准必须是用户本人逐项确认**——
+把每一项的描述与报价（`credits` + 续跑一轮 `turnCredits`）原样告诉用户，用户说了「批准这一项」才带该项的 `quoteId` 批准；
+`quoteId` 只在 `agent-run get` 里签发、15 分钟有效，过期就重新查询并重新确认。用户事先说「你看着办」「全部批准」也不能替他逐项批准花钱动作，
+也不要自动替用户取凭证批准。起 run 缺省只出计划（`autoGenerate:false`），要升级为允许生成也要先征得用户同意。
 
 ### 2. 优先在你自己创建的画布上工作
 
@@ -286,10 +302,11 @@ API 一概看不见。
 ```
 
 - `dj.mjs extract` 的字段与 `createCharacterBoard` / `createSceneSet` /
-  `createPropBoard` 对应；`dj.mjs storyboard` 的结果用 `createStoryboard` 落卡
-  （`kind:"video"` **一段一张分镜视频卡**，段的 `videoPrompt` / `durationSec` / `audio` /
-  `cast` / `props` 原样传回；缺省 `kind` 落分镜图卡并挂进故事板）。
-  **分镜视频卡只能由它派生**，不要用 `createCard kind:"video"` 手搓——见纪律 10。
+  `createPropBoard` 对应；`dj.mjs storyboard-job`（导演式拆镜）的结果按
+  [`references/director-storyboard.md`](references/director-storyboard.md) 落卡：`settings` 建设定板，
+  每个 `segments[]` 原样作为 `createStoryboard kind:"video"` 的一张分镜视频卡（**一段一卡**，
+  规范全文 `text` 不改写）。旧 `dj.mjs storyboard` 已弃用（其产物仍可用 `storyboard-fall` 落卡）。
+  **分镜视频卡只能由 `createStoryboard` 派生**，不要用 `createCard kind:"video"` 手搓——见纪律 10。
 - 落卡之后要再改，就 `dj.mjs node` 读回那张卡，用 `updateCard` 改字段，
   **不要重跑分析端点**（重跑要再付一次钱，还会冲掉用户刚做的修改）。
 - **分镜表卡已下线**：没有 `createShotTable` / `updateShotRow` / `insertShotRow` /
@@ -300,12 +317,13 @@ API 一概看不见。
 
 | 命令 | `billingUnit` | 口径 |
 |---|---|---|
-| `extract` / `storyboard` / `rewrite` | `per_round` | **扣积分**。一次调用算一轮，与输出长度无关——拆分镜输出上万 token 也是一轮 |
-| `caption`（图片） | `per_call` | **扣积分**：0.1 积分/次（与网页端同价），失败自动退款 |
-| `caption`（视频） | `per_second` | **扣积分**：0.1 积分/秒，时长 = max(`durationSec`, 末帧时刻) 向上取整秒，上限 600 秒 |
-| `inspect` | `free` | **不扣积分**，但照样受 `llm` scope 与限流约束 |
+| `extract` / `storyboard`（已弃用） / `rewrite` | `per_round` | **扣积分**。一次调用算一轮，与输出长度无关——拆分镜输出上万 token 也是一轮 |
+| `storyboard-job` / `adapt` | （异步作业，无 `billingUnit`） | **扣积分**：拆镜按剧本字数预收、结算退差额；改编报价是上限 `maxCredits`、按批结算。**以 dryRun 报价为准**（不带 `--yes` 即只报价），实付看作业的 `charge` / `chargedCredits` |
+| `caption`（图片） | `per_call` | **扣积分**：按次计（与网页端同价，单价随平台价目调整），实扣以响应 `meta.credits` 为准，失败自动退款 |
+| `caption`（视频） | `per_second` | **扣积分**：按秒计，时长 = max(`durationSec`, 末帧时刻) 向上取整秒，上限 600 秒；单价以响应 `meta.credits` 为准 |
+| `inspect` | `per_call` | **扣积分**：按次计（与网页端同价），上游失败或判定解析失败自动退回，实扣以 `meta.credits` 为准；照样受 `llm` scope 与限流约束 |
 
-文本三条另带 `meta.credits`（本次实耗）与 `meta.usage`（真实 token），`caption` 带
+文本三条另带 `meta.credits`（本次实耗）与 `meta.usage`（真实 token），`caption` / `inspect` 带
 `meta.credits` 与 `meta.creditRef`，收尾汇报时都算进总账（纪律 6）。
 
 **视觉端点的素材一律先上传换 assetId**：不收 dataURL、不收 URL、不收本地路径。
@@ -359,51 +377,43 @@ dj edit-session status "$SID" --pretty
 也要先把前面几步补齐，跳过任何一步都会在最后一步静默出错：
 
 ```
-① 剧本文本卡 → ② 角色/场景/道具设定板并出图 → ③ 拆分镜 → ④ createStoryboard kind:"video"
-→ ⑤ 定嗓 → ⑥ 出视频
+（可选：小说 → dj adapt 改成分集剧本）→ ① 剧本文本卡 → ② 导演式拆镜（dj storyboard-job）
+→ ③ 角色/场景/道具设定板落卡并出图 → ④ createStoryboard kind:"video" → ⑤ 定嗓 → ⑥ 出视频
 ```
 
 - **① 第一步永远是把剧本落成文本卡**（`createCard` kind=text，正文放剧本全文）。
   它是后续一切的真相源：提取从它出发、改稿改它、出了问题回头核对它。
   手上只有一句创意时，先跟用户把剧本聊出来再落卡，不要拿一句话直接去拆分镜。
-- **② 提取素材并落卡，顺序是角色 → 场景 → 道具，然后把设定板出图**。提取用
-  `dj extract`（只返数据不落卡），过一遍用户意见后用 `createCharacterBoard` /
-  `createSceneSet` / `createPropBoard` 落卡；再用卡上编译好的提示词（纪律 11）逐板
-  `t2i` 出定妆照 / 全景 / 道具图。分镜视频引用的是设定板的**产物**——板没出图 = 参考为空，
-  连了线也等于没连。这是第一次报价（纪律 1）。
-- **③ 才拆分镜**（`dj storyboard`，整集一次拆完），把上一步落卡的名字作 `--cast` /
-  `--scenes` 传回去——让镜头里的人名与画布上的卡逐字对齐；把每个角色的 `shotInjection`
-  映射成 `[{name, anchor}]` 用 `--anchors` 传入，否则模型每个镜头都在重新想象这个角色长什么样。
-  `anchor` 每条 ≤60 字、只写硬特征——别拿 `look`（完整外貌描述）充数，超长直接 400。
-  **带上 `--video-model <出片模型id>`**：服务端按该模型的时长区间拆段（各模型最短时长不同，见目录 `video.durationSec`），
-  不传就可能拆出 3 秒段、出片时按 4 秒计费；也可直接给 `--segment-min-sec` / `--segment-max-sec`。
-- **④ 落分镜视频卡，只能用 `createStoryboard kind:"video"`**：**优先用
-  `dj storyboard-fall <canvasId> -f <storyboard响应.json>`**——按场次切批、空场景名兜底、
-  一场超 30 段自动拆批全在命令里，自己拼批次写错的表现是静默断链。它等价于：每场一批，params 带
-  `sceneName` + `layout:"grouped"`，`shots` 逐段取该场 `segments[]` 的
-  `{title, videoPrompt→prompt, durationSec, audio, cast, props}` **原样传回**
-  （段内角色/道具并集与音轨标记由服务端算好）：
-
-  ```jsonc
-  {"op":"createStoryboard","params":{
-    "kind":"video", "sceneName":"深夜便利店", "layout":"grouped",
-    "shots":[{"title":"镜01-02","prompt":"<segments[0].videoPrompt>","durationSec":7,
-              "audio":true,"cast":["林小满"],"props":["收银机"]}]
-  }}
-  ```
-
+  手上是**小说**时先 `dj adapt <小说.txt>`（★收费，不带 `--yes` 只报价）改成分集剧本，
+  `dj adapt get <id> --wait --out ./eps` 逐集落盘，**一集一张剧本文本卡、一集一个拆镜作业**。
+- **② 导演式拆镜**（`dj storyboard-job <剧本文件> --canvas "$CANVAS" --video-model <出片模型id> --aspect 9:16`，
+  整集一个作业）。★收费：不带 `--yes` 只报价，把报价告诉用户、等确认后加 `--yes --wait --out sb.json`。
+  `--canvas` 让服务端读画布上已有的设定卡，镜头里的人名与外观与卡**逐字对齐**（不必再传 cast / anchors）；
+  `--video-model` 让镜头按出片模型的写法与单镜时长上限设计（不传可能拆出低于模型下限、按下限计费的段）。
+  每账号同时最多 3 个拆镜作业；失败的场会自动重跑一次，仍不过就**带标记交付**（`scenes[].status` 非 `ok`），
+  落卡前把这些场与 `result.issues` 一起告诉用户。`contentAccess:"excerpt"` 的失败节选**不能落卡**。
+  旧 `dj storyboard` 已弃用（保留 ≥30 天），新工程别再用。
+- **③ 设定板落卡并出图，顺序是角色 → 场景 → 道具**：拆镜结果的 `settings` 按
+  [`references/director-storyboard.md`](references/director-storyboard.md) 的映射用 `createCharacterBoard` /
+  `createSceneSet`（或场景图卡）/ `createPropBoard` 落卡（画布上已有同名卡的跳过，`missingRefs` 补建），
+  过一遍用户意见；再用卡上编译好的提示词（纪律 11）逐板 `t2i` 出定妆照 / 全景 / 道具图。
+  分镜视频引用的是设定板的**产物**——板没出图 = 参考为空，连了线也等于没连。这是第一次报价（纪律 1）。
+  只要设定、不拆镜时用 `dj extract`（只返数据不落卡）。
+- **④ 落分镜视频卡，只能用 `createStoryboard kind:"video"`**：每场一批，params 带
+  `sceneName`（取场头 `heading`）+ `layout:"grouped"`，**把每个 segment 原样作为 createStoryboard 的参数**
+  （一段一张卡；字段名见 [`references/director-storyboard.md`](references/director-storyboard.md)「落卡映射」），
+  规范全文 `text` 一字不改。一场超 30 段分批落，同一 `sceneName` 复用同一引用坞与编组。
   落出来是站内「提取分镜」同款：本场参考收进引用坞放最左列、视频卡排网格、整块圈进
   以场景名为标题的编组。三条禁令：**禁止**用 `createCard kind:"video"` 建分镜视频卡
   （不匹配参考、不进坞、不成组）；**禁止**把 `shots` 逐镜落成视频卡（段才是生成单位，
-  多镜切换由模型在一次生成内完成）；**禁止**自拼 `prompt`。
-  **落卡前先看每段的 `lint`**（`dj storyboard` 响应里 `segments[].lint`，编译后机检，
-  只记录不拦截）：`lint.error > 0` 时先按 `lint.codes` 回到 ③ 修分镜再落卡，
-  `warn` 酌情（多为台词塞不进镜、镜头过长过短这类），`info` 可忽略；判据表见
-  API 文档 §5.7.4。
-  op 结果的 `noop` 点名了「声明了却没有设定板」的名字时，回到 ② 补建、出图，再落。
-  同一 `sceneName` 再落一批会复用同一引用坞，不会出现两个坞。
-- **⑤ 有台词的角色先定嗓**（`dj character-voices <canvasId>` 看谁还没定），
-  再批量出对白镜头——否则同一角色每镜换一把嗓子，且事后无法补救（只能重出）。
+  多镜切换由模型在一次生成内完成）；**禁止**自拼或改写 `prompt`。
+  op 结果的 `noop` 点名了「声明了却没有设定板」的名字时，回到 ③ 补建、出图，再落。
+  （旧 `dj storyboard` 的产物仍用 `dj storyboard-fall <canvasId> -f <响应.json>` 落卡；它不认 storyboard-job 的结果。）
+- **⑤ 首镜定嗓，未达标的角色试镜**（`dj character-voices <canvasId>` 看谁还没定），
+  再批量出其余对白镜头——否则同一角色每镜换一把嗓子，且事后无法补救（只能重出）。
+  先挑一段对白最适合的分镜视频卡（主要角色单人台词最长、同框开口最少）报价出片 → 对成片抽干声（v2a，
+  `dryVoice:true`）→ `dj voice-harvest`（MCP `harvest_character_voices`，免费）切出各角色样本 →
+  **用户试听确认后**再 `--bind`；没过质量闸（`next:"audition"`）的角色、旁白再走试镜。
   全流程见「角色音色一致性」章。
 - **⑥ 出视频前先跑画布体检，再核参考**：`dj canvas lint "$CANVAS" --pretty`（MCP：`lint_canvas`；
   **只读、不扣积分**，跑多少次都不花钱）。**有 `error` 级 finding 就不许提交生成**——按每条
@@ -432,7 +442,7 @@ dj edit-session status "$SID" --pretty
 - 已经跳步建了一堆孤立的卡怎么办：**不要删了重来**（会丢已生成的产物）。
   缺设定板的先补建并出图，缺边的用 `connectCards` 把设定板连到视频卡上，再继续。
 - 用户明确要求「只要剧本，先别建东西」时，就只调分析端点、只把结构给他看——
-  `analyze` 系列默认不落卡，正是为这种「先看后建」准备的。
+  `analyze` 系列与 `storyboard-job` 默认不落卡，正是为这种「先看后建」准备的。
 
 ### 11. 每次生成前复查提示词，别把没检查过的字符串送去烧钱
 
@@ -456,7 +466,7 @@ dj edit-session status "$SID" --pretty
   带别人、不是三视图，而它正是后面所有镜头的参考基准，错在这一步会污染整部片子。
   同理，场景全景与道具板落卡时也各自编译过，都用 `dj node` 读回再提交。
 - **视频提示词就是分镜视频卡上的 `prompt`**（`createStoryboard kind:"video"` 落卡时来自
-  `analyze/storyboard` 的 `segments[].videoPrompt`）：生成前 `dj node` 读回原样提交，
+  导演式拆镜 `segments[].text`，旧接口则是 `segments[].videoPrompt`）：生成前 `dj node` 读回原样提交，
   不要自己按 `shots` 拼、也不要只在请求里临时改写。带 `--canvas`/`--node` 且不给 `params.prompt` 时，
   服务端直接用卡上的提示词（回执 `meta.promptSource` 写明来源）；要改写就先 `updateCard` 改卡，
   别只在请求里临时换一段。平台编译过的版本里，多镜段带硬切
@@ -569,6 +579,9 @@ dj edit-session status "$SID" --pretty
 - **稿件正文与产物只从响应的 `artifacts[]` 取**（A/B 两稿逐稿带 `variantId`）：不要让用户把稿子
   贴回来，也不要自己复述一遍再当下一轮的输入。要指定「就用哪一稿」，下一轮用 `references`
   带上那个 `artifactId` 即可——服务端自己去取最新正文。
+- **会话只做文字产出，要落卡 / 生成就委托创作助手**：多步的画布创作（从剧本搭整套画布、按分镜批量出图出片）
+  优先 `dj agent-run`（见「委托模式」章）；精修单张卡、重出一张图仍用原子命令。委托 run 的 `runId` 同样是状态：
+  丢了别重新委托一遍，同一 `requestId` 重发会回原 run。
 
 ### 14. 图片默认用目录里带 default 标记的模型、最低价档；高档按 tierMultipliers 加价，赠送积分是否覆盖以报价为准
 
@@ -657,13 +670,20 @@ dj me --pretty
 dj projects create "深夜便利店" --pretty
 #    → projectId p_xxxxxxxx / canvasId <uuid> / url /canvas/p_xxxxxxxx
 
-# 1.5) 手上有剧本？先让平台拆成结构，别自己读剧本硬编（会扣积分，但比出图便宜两个数量级）
-dj extract characters --script ./ep1.txt --pretty
-dj storyboard --script ./ep1.txt --cast "…" --scenes "…" --anchors /tmp/anchors.json --pretty
-#    → 只返数据不落卡：和用户过一遍、改掉不对的，再在下一步落进 ops 批次
+# 1.4) 手上是小说？先改成分集剧本（★收费：不带 --yes 只报价，等用户确认再加 --yes）
+dj adapt ./novel.txt --title "深夜便利店" --episode-sec 90 --pretty
+dj adapt ./novel.txt --title "深夜便利店" --episode-sec 90 --yes --wait --out ./eps
+#    → ./eps/ep01.txt …；paused 时请用户到站内写作台（webPath）继续
+
+# 1.5) 手上有剧本？导演式拆镜，别自己读剧本硬编（★收费：先报价、等确认）
+dj storyboard-job ./ep1.txt --canvas "$CANVAS" --video-model "$VIDEO_MODEL" --aspect 9:16 --pretty
+dj storyboard-job ./ep1.txt --canvas "$CANVAS" --video-model "$VIDEO_MODEL" --aspect 9:16 \
+  --yes --wait --out ./sb-ep1.json
+#    → 只返数据不落卡：设定 + 场→片段→镜。和用户过一遍（含非 ok 的场与 issues），
+#      再按 references/director-storyboard.md 的映射在下一步落进 ops 批次
 
 # 2) 按纪律 10 的顺序落卡：剧本文本卡 → 角色/场景/道具板（出图）→ 每场一批
-#    createStoryboard kind:"video"（完整命令见「完整工作流：从提取到回写」）。
+#    createStoryboard kind:"video"，每个 segment 原样作一张卡（映射见 references/director-storyboard.md）。
 #    建卡 + 连线可以放**同一批**：建卡时起 clientRef（"@hero"），后面的 op 直接引用它
 dj ops <canvasId> -f /tmp/batch1.json --pretty
 
@@ -704,7 +724,7 @@ dj generate --request-id "$RID" --model <模型id> --capability t2i \
   --canvas <canvasId> --node <nodeId> --pretty
 dj task <taskId> --watch --pretty
 
-# 6.5) 出图之后、交付之前可以质检一下（不扣积分）
+# 6.5) 出图之后、交付之前可以质检一下（按次扣积分，告诉用户再跑）
 dj inspect <产物assetId> --prompt "雨夜便利店门口，霓虹反射在积水里" --pretty
 #    checks 里没有的维度 = 缺基准没判，不等于通过
 
@@ -733,7 +753,7 @@ node $SKILL/scripts/download.mjs --project <projectId> --out ./out --pretty
 
 两条实用推论：
 
-1. **给每个 shot 传 `cast` / `props`**（把 `analyze/storyboard` 每镜产出的 `cast` 原样传回来）——
+1. **给每个 shot 传 `cast` / `props`**（导演式拆镜取该段 `shots[].cast` / `props` 的并集，按映射原样传回）——
    这是参考图连线的**确定性**依据，名字含全角/半角空格差异也能连上。
    不传时才退回「名字有没有出现在 title+prompt 里」的子串猜测：提示词写「她推开门」
    而不是「林小满推开门」就**静默断链**，角色跨镜漂移且你不会收到任何报错。
@@ -797,6 +817,49 @@ node "$SKILL/scripts/download.mjs" --jianying <canvasId> --group <分镜组group
 
 ---
 
+## 委托模式（复杂多步任务交给画布创作助手）
+
+站内的**画布创作助手**能在画布上连续读卡、搭卡、写提示词、出计划、提交生成——和用户在网页端用它是同一个内核。
+「从剧本搭出整套画布」「按分镜批量出图出片」这类**要连续做十几步、每步依赖上一步**的活儿，优先委托给它；
+改一张卡、重出一张图、调一个参数这类**精修**，仍用上面的原子命令（ops / generate），更快更省。
+
+```sh
+# 1) 委托（起首轮扣一轮模型费）：先报价，告诉用户、等确认后加 --yes
+dj agent-run start "$CANVAS" "按剧本卡拆分镜，搭好角色/场景/分镜视频卡" --pretty
+dj agent-run start "$CANVAS" "按剧本卡拆分镜，搭好角色/场景/分镜视频卡" --yes --wait --pretty
+#    缺省只出计划、搭卡（autoGenerate:false），不会花生成的钱；用户明确要生成才加 --auto-generate
+
+# 2) 等它停下：--wait 按 pollAfterMs 轮询，停在 awaiting_approval（列出待批项）或终态
+dj agent-run get <runId> --wait --pretty
+
+# 3) 待批项逐项给用户看：描述 + 报价（credits + 续跑一轮 turnCredits）+ quoteId 与过期时间
+#    用户本人确认「批准这一项」后才批准；不要的项拒绝（可附原因给助手）
+dj agent-run approve <runId> <actionId> --quote-id <该项的 quoteId>
+dj agent-run reject  <runId> <actionId> --note "这一步先不做"
+#    同一批待批项全部答完，助手才继续；然后回到第 2 步
+
+# 4) 改方向 / 补充要求：插话（起一轮扣模型费，同样先报价再 --yes）
+dj agent-run steer <runId> "角色都换成古装" --yes
+#    助手空闲时立即起轮并作废未处理的待批项；在跑时排队到本轮结束
+
+# 5) 不做了：软取消（在跑的一轮跑完即止；已批准提交的生成照常完成、按实结算）
+dj agent-run cancel <runId>
+```
+
+- **花钱必须用户逐项确认**（纪律 1）：`approve` 必须显式带 `--quote-id`，凭证只在 `get` 里签、15 分钟有效；dj 不会替用户取凭证批准。
+  用户说「全部批准」「你看着办」也要把每一项的价格报给他——那种授权不覆盖花钱额度。
+- **`autoGenerate` 默认只出计划**：只出计划的 run 批准花钱项会 409 `agent_run_plan_only`；用户同意花钱后先
+  `dj agent-run steer <runId> --auto-generate "…" --yes` 升级（只升不降），再对新出的待批项逐项报价确认。
+- **`runId` 是状态**：记下它；丢了别重新委托一遍（同一 `--request-id` 重发会回原 run）。
+- 撞 409 `agent_run_state`（在跑时批准、actionId 过期、已取消后插话）→ 先 `get` 看最新状态再决定，别原样重试；
+  403 `agent_run_unavailable` = 创作助手对这个账号暂不可用，如实告诉用户、改用原子命令。
+- **权限与额度**：起 run / 插话 / 批准 / 拒绝要令牌同时带 `llm` + `projects:read` + `canvas:write`（缺 → 403 `insufficient_scope`）；
+  委托助手的模型费也计入本令牌的总额度 / 日额度（放不下 → 402，未扣费）；每个令牌每天最多新建 30 个 run、同时在跑 3 个（429 `agent_run_limit_exceeded`）。
+- 交付时照纪律 6 汇报画布链接：助手的产物都在画布上，用户可以打开浏览器接着改。
+- 细节（视图字段、待批项类型、状态机、插话与取消语义）见 [`references/agent-runs.md`](references/agent-runs.md)。
+
+---
+
 ## 参考文档（`references/`，按需读，不必全读）
 
 主文件到此为止是**每次都要遵守的部分**：能力边界、登录、15 条纪律、北极星旅程。
@@ -808,10 +871,13 @@ node "$SKILL/scripts/download.mjs" --jianying <canvasId> --group <分镜组group
 | [`references/endpoints.md`](references/endpoints.md) | 要调任何端点前；不确定响应长什么样、该用哪个能力词；配音要控情绪/分段（「配音情绪向量」节：先查 `audio.emotionVector`，分段按段数×单次价报价；t2a 报价带 `text`（可加 `speed`）才是按秒准价）；用 GM 配音（音色填 `voiceId`、情绪走 `styleText`） |
 | [`references/ops-vocabulary.md`](references/ops-vocabulary.md) | 要写任何画布改动批次；查 `updateCard` 能改哪些字段 |
 | [`references/video-prompt.md`](references/video-prompt.md) | **所有视频生成前必读**——参考编号、台词前缀、限制段 |
-| [`references/voice-consistency.md`](references/voice-consistency.md) | **对白剧集必读**——试镜定嗓，同一角色全剧一把嗓子 |
-| [`references/blockout.md`](references/blockout.md) | 用户要「把这段视频换成我的角色重演」 |
+| [`references/voice-consistency.md`](references/voice-consistency.md) | **对白剧集必读**——首镜定嗓、试镜兜底，同一角色全剧一把嗓子 |
+| [`references/director-storyboard.md`](references/director-storyboard.md) | **拆分镜必读**——导演式拆镜（`storyboard-job`）的结果结构、落卡映射、计费与并发、失败场标记；小说改剧本（`adapt`）怎么接上拆镜 |
+| [`references/remake.md`](references/remake.md) | 用户要「把这段视频里的人换成我的角色，场景动作不动」（换人重演：参考帧怎么画、`--keyframe` 写法、原声） |
+| [`references/blockout.md`](references/blockout.md) | 用户要「把这段视频换成我的角色重演」且连场景也要换（白模换角） |
 | [`references/assets-and-llm.md`](references/assets-and-llm.md) | 传本地文件、请用户涂蒙版、读剧本出结构、改文案 |
 | [`references/agent-conversations.md`](references/agent-conversations.md) | 跟目录里的 Agent 开多轮会话（纪律 13） |
+| [`references/agent-runs.md`](references/agent-runs.md) | 把多步画布创作委托给创作助手（`dj agent-run`）：视图字段、待批项与 quoteId、插话 / 取消语义、错误码 |
 | [`references/creator-analysis.md`](references/creator-analysis.md) | 拆解对标博主；把抖音链接下到本地看片（纪律 15） |
 | [`references/reference-video.md`](references/reference-video.md) | 用户给了一条爆款/对标视频要照着做：拿分段实现账 → 读懂功能序列 → **`reference-frames` 亲眼复核** → 写三份文件 → 按可换/必保维度改编落画布 |
 | [`references/topic-intel.md`](references/topic-intel.md) | 用户问「今天做什么选题 / 帮我盯着这几个对标博主 / 别人这条是怎么写的」；订阅博主、读日报热榜、读每日简报、检索文案库 |

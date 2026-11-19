@@ -87,7 +87,7 @@ dj chat delete "$CHAT" --pretty
 ```sh
 dj chat show "$CHAT" | jq '.meta'
 # { "billingUnit":"per_round", "stagesPerTurn":3,
-#   "perRoundCredits":0.1, "estimatedTurnCredits":0.3 }   ← 「这一轮预计 0.3 积分」
+#   "perRoundCredits":0.1, "estimatedTurnCredits":0.3 }   ← 数值仅为示例，按实际返回报「这一轮预计 X 积分」
 ```
 
 三条边界：

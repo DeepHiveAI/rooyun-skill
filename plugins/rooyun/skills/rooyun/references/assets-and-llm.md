@@ -104,10 +104,11 @@ dj extract scenes     --script ./ep1.txt --pretty
 # 画布上已经有的名字传进去，服务端会剔除，省一轮白跑
 dj extract characters --script ./ep1.txt --existing "林小满,陈默" --pretty
 
-# 剧本 → 分镜（整集一次拆完，别逐场反复重拆——每次都在付钱）
-dj storyboard --script ./ep1.txt --pretty
-dj storyboard --script ./ep1.txt --cast "林小满,陈默" --scenes "深夜便利店,老城区天台" \
-  --bible ./bible.md --pretty
+# 剧本 → 导演式拆镜（异步作业，整集一个作业，别逐场反复重拆——每次都在付钱）
+# 不带 --yes 只报价；用户确认后加 --yes。结果结构与落卡映射见 director-storyboard.md
+dj storyboard-job ./ep1.txt --canvas "$CANVAS" --video-model "$VIDEO_MODEL" --aspect 9:16 --pretty
+dj storyboard-job ./ep1.txt --canvas "$CANVAS" --video-model "$VIDEO_MODEL" --aspect 9:16 --yes --wait --out ./sb.json
+# （旧 dj storyboard --script … 已弃用，保留 ≥30 天）
 
 # 文案加工（edit 必须给 --instruction；translate 不接受 --instruction）
 dj rewrite edit      --text "他走进店里。" --instruction "扩写成有画面感的一段，40 字以内" --pretty
@@ -128,9 +129,9 @@ dj inspect "$SHOT_ASSET" --prompt "雨夜便利店门口，霓虹反射在积水
 
 `extract` / `storyboard` / `rewrite` 是 `per_round`——**扣积分**，一次调用算一轮，
 与输出长度无关（拆分镜输出上万 token 也是一轮）。`caption` 也**扣积分**（与网页端同价）：
-图片 `per_call` 0.1 积分/次，视频 `per_second` 0.1 积分/秒（按时长向上取整秒，上限 600 秒），
-失败自动退款，余额 / 令牌限额不足回 402，未配价回 503。`inspect` 是 `free`——**不扣积分**，
-但照样受 `llm` scope 与限流约束（`caption` / `inspect` 共用视觉桶，90 次/分/令牌）。
+图片 `per_call` 按次计，视频 `per_second` 按秒计（按时长向上取整秒，上限 600 秒；单价随平台价目调整，
+实扣以 `meta.credits` 为准），失败自动退款，余额 / 令牌限额不足回 402，未配价回 503。`inspect` 是
+`per_call`——**按次扣积分**（上游失败或判定解析失败自动退回），照样受 `llm` scope 与限流约束（`caption` / `inspect` 共用视觉桶，90 次/分/令牌）。
 
 扣积分的几条都带 `meta.credits`（文本三条另有 `meta.usage`），收尾汇报时算进总账。
 
@@ -188,21 +189,19 @@ for NODE in $(printf '%s' "$OPS" | jq -r '.data.createdNodeIds[]'); do
 done
 #    场景全景（createSceneSet）与道具板（createPropBoard）同样先落卡、再读回提示词出图
 
-# ⑤ 拆分镜（整集一次拆完，别逐场重拆）：把已落板的名字与外观锚传回去
-CAST=$(printf '%s' "$CHARS" | jq -r '[.data.characters[].name] | join(",")')
-# anchor 上限 60 字，超了 400：只放硬特征（年龄档/体型/主色），别把 look 全文塞进来
-printf '%s' "$CHARS" | jq '[.data.characters[] | {name, anchor: .shotInjection}]' > /tmp/anchors.json
-SB=$(dj storyboard --script ./ep1.txt --cast "$CAST" --scenes "<场景名,…>" --anchors /tmp/anchors.json)
+# ⑤ 导演式拆镜（整集一个作业，别逐场重拆；★收费：先报价、等确认）。
+#    --canvas 让服务端读画布上已落的设定板，镜头人名与外观自动与卡对齐（不必再传 cast / anchors）
+dj storyboard-job ./ep1.txt --canvas "$CANVAS" --video-model "$VIDEO_MODEL" --aspect 9:16 --pretty
+dj storyboard-job ./ep1.txt --canvas "$CANVAS" --video-model "$VIDEO_MODEL" --aspect 9:16 \
+  --yes --wait --out /tmp/sb.json
+#    result.settings 里画布上还没有的设定 / result.missingRefs 回到 ③④ 补建、出图
 
-# ⑥ 落分镜视频卡：一条命令搞定（按场次自动切批、kind:"video" + grouped、超 30 段自动拆批）
-printf '%s' "$SB" > /tmp/sb.json
-dj storyboard-fall "$CANVAS" -f /tmp/sb.json --script "$SCRIPT_NODE" --pretty
-#    --script 传纪律 10 第①步落的剧本文本卡 id：视频卡才带站内同款 shotOf 溯源锚与
-#    「场景N·视频｜<剧本标题>（<场景名>）」组名；不传站内会判「本剧本没拆过分镜」而重复落一整套卡
+# ⑥ 落分镜视频卡：每场一批 createStoryboard kind:"video" + layout:"grouped"，
+#    每个 segment 原样作一张卡（映射与示例见 director-storyboard.md「落卡映射」）
 #    落出来就是站内「提取分镜」同款（本场引用坞 + 视频网格 + 编组）
-#    unmatchedNames 里点名的名字 = 声明了却没有设定板：回到 ③ 补建、出图，再补一次 connectCards
-#    等价的手写 jq 见「ops 词表速查」的 createStoryboard 条目（自己写 jq 出错的表现是**静默断链**）
-#    ✗ 不要 createCard kind:"video"（不连参考、不进坞、不成组）  ✗ 不要逐镜落卡  ✗ 不要自拼 prompt
+#    op 结果 noop 点名的名字 = 声明了却没有设定板：回到 ③ 补建、出图，再补一次 connectCards
+#    ✗ 不要 createCard kind:"video"（不连参考、不进坞、不成组）  ✗ 不要逐镜落卡  ✗ 不要自拼 / 改写 prompt
+#    （storyboard-fall 只认旧 dj storyboard 的产物，不能喂 storyboard-job 的结果）
 
 # ⑦ 出片前的门禁（纪律 10 第六步）：报价之前先体检（只读、不扣积分），errors 归零才往下走
 dj canvas lint "$CANVAS" --pretty || {

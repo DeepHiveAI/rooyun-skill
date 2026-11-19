@@ -1,5 +1,5 @@
 <!--
-  rooyun-skill-version: 1.60.1
+  rooyun-skill-version: 1.62.1
 
   把下面 `## RooYun 开放 API` 整段粘进你项目的 AGENTS.md（Codex）或等价的长期指令文件，
   并把 rooyun-skill/scripts/ 放到 Agent 能执行到的位置（零依赖，Node ≥ 18）。
@@ -72,11 +72,13 @@ node scripts/dj.mjs login   # ② 再跑一次：等待授权（最多 90s），
 8. **分析端点返回的是结构化数据，改完用 ops 回写，别重新提取**。重跑一次分析既要用户
    再付一次钱，又会冲掉他刚做的修改。链路固定为「拿到结构 → 和用户过一遍改掉不对的 →
    `ops` 写进画布 → 之后要改就 `dj node` 读回那张卡、用 `updateCard` 改字段」。
-   `dj storyboard` 的结果用 `createStoryboard kind:"video"` 落分镜视频卡（分镜表卡已下线；
-   分镜视频卡只能由它派生，见纪律 10）。
+   `dj storyboard-job`（导演式拆镜）的结果按 `references/director-storyboard.md` 落卡：每个
+   segment 原样作一张 `createStoryboard kind:"video"` 分镜视频卡（分镜表卡已下线；
+   分镜视频卡只能由它派生，见纪律 10）。旧 `dj storyboard` 已弃用。
    **计费分叉读 `meta.billingUnit`**：`extract`/`storyboard`/`rewrite` 是 `per_round`
-   （扣积分，一次调用算一轮，与输出长度无关）；`caption` 扣积分（图片 `per_call` 0.1/次、
-   视频 `per_second` 0.1/秒，调用前报价）；`inspect` 是 `free`（不扣积分，但仍受 `llm` scope 与限流约束）。
+   （扣积分，一次调用算一轮，与输出长度无关）；`storyboard-job` / `adapt` 是异步作业，以 dryRun 报价为准；
+   `caption` 扣积分（图片 `per_call` 按次、视频 `per_second` 按秒，实扣看 `meta.credits`，调用前报价）；
+   `inspect` 按次扣积分（`per_call`，失败退回，实扣看 `meta.credits`）。
    视觉端点素材一律先 `dj upload` 换 assetId（不收 dataURL/URL/路径，超过约 1.4MB
    的图服务端会自动缩小，视频要你自己抽帧）。质检里 `checks` 没有的维度 = 缺基准**没判**
    而非通过，`meta.mock=true` 是演示产物没有信息量——两者都别当结论转述。
@@ -91,19 +93,18 @@ node scripts/dj.mjs login   # ② 再跑一次：等待授权（最多 90s），
    **链接等同凭据**（免登录、谁拿到谁能编辑那张卡）：只转述给用户本人，不写进文件与日志。
 10. **按依赖顺序搭画布：剧本 → 角色/场景/道具 → 分镜视频卡 → 定嗓 → 生成；分镜视频卡只能由
     `createStoryboard` 派生。顺序是硬规则，用户说「直接出视频」也要先把前面几步补齐。**
-    ① `createCard(kind=text)` 先把剧本落成文本卡（后续提取都以它为源；只有一句创意就先把
-    剧本写出来）；② `dj extract characters/scenes/props` 提取后用 `createCharacterBoard` /
-    `createSceneSet` / `createPropBoard` 落卡，**然后逐板出图**（提示词 `dj node` 读回卡上编译好的
-    那份；分镜视频引用的是设定板的**产物**，板没出图 = 参考为空）——第一次报价；
-    ③ 再 `dj storyboard` 拆分镜（整集一次），把上一步的名字作 `--cast` / `--scenes` 传回去，
-    并把每个角色的 `shotInjection` 映射成 `[{name,anchor}]` 用 `--anchors` 传入；
-    ④ **优先用 `dj storyboard-fall <canvasId> -f <storyboard响应.json> --script <剧本卡id>`**（按场次切批、
-    空场景名兜底、超 30 段自动拆批全在命令里；自己拼批次写错的表现是静默断链）。
-    它等价于**每场一批 `createStoryboard kind:"video"`**，params 带 `sceneName` + `layout:"grouped"`，
-    `shots` 逐段取该场 `segments[]` 的 `{title, videoPrompt→prompt, durationSec, audio, cast, props}`
-    原样传回——落出来才是站内「提取分镜」同款（本场参考进引用坞、视频卡排网格、整块成组）。
+    （可选：手上是小说先 `dj adapt <小说.txt>` 改成分集剧本，`adapt get --out` 逐集落盘）
+    ① `createCard(kind=text)` 先把剧本落成文本卡（后续一切以它为源；只有一句创意就先把
+    剧本写出来）；② `dj storyboard-job <剧本文件> --canvas <canvasId> --video-model <id> --aspect 9:16`
+    导演式拆镜（整集一个作业；★收费，不带 `--yes` 只报价；每账号同时 ≤3 个；失败场自动重跑一次、
+    仍不过带标记交付，看 `scenes[].status` 与 `issues`）；③ 结果的 `settings` 用 `createCharacterBoard` /
+    `createSceneSet` / `createPropBoard` 落卡（已有同名卡跳过、`missingRefs` 补建），**然后逐板出图**
+    （提示词 `dj node` 读回卡上编译好的那份；分镜视频引用的是设定板的**产物**，板没出图 = 参考为空）
+    ——第一次报价；④ **每场一批 `createStoryboard kind:"video"`**，params 带 `sceneName` + `layout:"grouped"`，
+    每个 segment 原样作一张卡（映射见 `references/director-storyboard.md`）——落出来才是站内
+    「提取分镜」同款（本场参考进引用坞、视频卡排网格、整块成组）。
     **禁止 `createCard kind:"video"` 建分镜视频卡**（不连参考、不进坞、不成组）、禁止逐镜落卡、
-    禁止自拼 prompt；op 结果 `noop` 点名的名字 = 没有设定板，回 ② 补建；
+    禁止自拼 prompt；op 结果 `noop` 点名的名字 = 没有设定板，回 ③ 补建；
     ⑤ 有台词的角色先 `dj character-voices` 定嗓；⑥ 出视频前**先跑 `dj canvas lint <canvasId>`**
     （MCP：`lint_canvas`；只读、不扣积分）：**有 error 级 finding 不许提交生成**，按 message
     补连线 / 补建设定板 / 先把设定板生成出来，`summary.errors` 归零（有 error 退出码 2，可写成
@@ -120,7 +121,7 @@ node scripts/dj.mjs login   # ② 再跑一次：等待授权（最多 90s），
     跳步的后果是**静默**的：卡都在、生成也成功，只是人物每镜换脸、场景每镜重造，
     而卡面上看不出任何异常。已经建错了就用 `connectCards` 补边、缺板的补建并出图，
     **不要删了重来**（会丢已生成的产物）。用户说「只要剧本先别建东西」时，
-    只调 `dj extract` / `dj storyboard`（它们默认不落卡）把结构给他看。
+    只调 `dj extract` / `dj storyboard-job`（它们默认不落卡）把结构给他看。
 11. **每次生成前复查提示词。**
     角色定妆照**不要自拟提示词**：`createCharacterBoard` 落卡时平台已编译好一份
     （单主体/中性表情/干净影棚/三视图/禁文字），用 `dj node <canvasId> <nodeId>` 读回
@@ -187,11 +188,12 @@ node scripts/dj.mjs login   # ② 再跑一次：等待授权（最多 90s），
 dj() { node scripts/dj.mjs "$@"; }   # 用函数不用变量：zsh 不拆分变量
 dj me --pretty                                        # 0 自省
 dj projects create "深夜便利店" --pretty               # 1 建项目（含首画布 + url）
-dj extract characters --script ./ep1.txt --pretty     # 1.5 剧本→结构（不落卡，扣积分）
+dj adapt ./novel.txt --episode-sec 90 --pretty         # 1.4 （可选）小说→分集剧本：先报价，确认后 --yes --wait --out ./eps
+dj storyboard-job ./ep1.txt --canvas <canvasId> --video-model <id> --aspect 9:16 --pretty   # 1.5 导演式拆镜：先报价 ★
+dj storyboard-job ./ep1.txt --canvas <canvasId> --video-model <id> --aspect 9:16 --yes --wait --out sb.json
 dj ops <canvasId> -f batch1.json --pretty             # 2 剧本文本卡 + 角色/场景/道具板 → 逐板出图
-dj storyboard --script ./ep1.txt --cast "…" --scenes "…" --anchors anchors.json   # 剧本→分镜（不落卡）
 dj ops <canvasId> -f scene1.json                      # 3 每场一批 createStoryboard kind:"video"
-                                                      #   （sceneName + grouped；段原样传回）
+                                                      #   （sceneName + grouped；每个 segment 原样一张卡）
 dj canvas list <projectId> --pretty                   # 3b 列画布（接着上次做时先跑它）
 dj canvas structure <canvasId> --pretty               # 4 读回结构（总览）
 dj node <canvasId> <nodeId> --pretty                  #   详读单卡（正文全文/可写参数/上下游）
@@ -202,7 +204,7 @@ RID=$(dj uuid)                                        # 7 幂等键，存下来
 dj generate --request-id "$RID" --model <id> --capability t2i \
    --params-json '{"prompt":"…","size":"1k"}' --canvas <c> --node <n>
 dj task <taskId> --watch --pretty                     # 8 轮询到终态（产物自动落卡）
-dj inspect <产物assetId> --prompt "…" --pretty         # 8.5 质检（不扣积分）
+dj inspect <产物assetId> --prompt "…" --pretty         # 8.5 质检（按次扣积分）
 node scripts/download.mjs --project <projectId> --out ./out --pretty   # 9 下载 + 完整性
 # 10 汇报画布链接，提示打开浏览器接力
 ```
@@ -211,11 +213,15 @@ node scripts/download.mjs --project <projectId> --out ./out --pretty   # 9 下�
 
 ```sh
 dj extract <characters|scenes|props> --script ./ep1.txt [--existing 名字,名字]  # 扣积分
-dj storyboard --script ./ep1.txt [--cast 名,…] [--scenes 地点,…] [--bible ./b.md]  # 扣积分
+dj storyboard-job <剧本文件> [--canvas <id>] [--video-model <id>] [--aspect 9:16] [--yes]  # 导演式拆镜，扣积分，默认只报价
+dj storyboard-job get <jobId> [--wait] [--out sb.json]                            # 查作业（免费）
+dj adapt <小说文件> [--episode-sec 60|90|120] [--yes]; dj adapt get <id> --wait --out ./eps  # 小说改剧本，扣积分
+dj remake --source <视频assetId> --keyframe <参考帧assetId>[:帧位[:序号@x]] [--yes --request-id <uuid>]  # 换人重演，见 references/remake.md
+dj storyboard --script ./ep1.txt [--cast 名,…] [--scenes 地点,…]   # 已弃用，改用 storyboard-job
 dj rewrite <edit|optimize|translate|lyrics> --text "…" [--instruction "…"]        # 扣积分
-dj caption image <assetId>                                                        # 扣积分 0.1/次
-dj caption video --frames <id,id,…> --duration <秒> [--times t1,t2] [--dialogue "…"]  # 扣积分 0.1/秒
-dj inspect <assetId> [--prompt "…"] [--dimensions integrity,…]   # 不扣积分；复杂 context 用 -f
+dj caption image <assetId>                                                        # 扣积分（按次，实扣看 meta.credits）
+dj caption video --frames <id,id,…> --duration <秒> [--times t1,t2] [--dialogue "…"]  # 扣积分（按秒，实扣看 meta.credits）
+dj inspect <assetId> [--prompt "…"] [--dimensions integrity,…]   # 按次扣积分；复杂 context 用 -f
 ```
 
 `extract` 出 `{kind, characters|scenes|props}`；`storyboard` 出

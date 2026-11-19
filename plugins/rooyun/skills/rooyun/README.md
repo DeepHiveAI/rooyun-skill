@@ -1,7 +1,7 @@
 # RooYun Skill · 安装与配置
 
 让 Claude Code / Codex / 任何有 shell 的编程 Agent 用自然语言驱动
-[RooYun](https://www.rooyun.com)：建项目与无限画布、把剧本拆成角色/场景/分镜卡片、
+[RooYun](https://www.rooyun.com)：建项目与无限画布、把小说改成剧本、把剧本按导演式拆镜拆成角色/场景/分镜卡片、
 调模型生成图片视频音频并自动落回卡片、把产物下载到本地。
 
 产出不是一堆文件，是**一张用户可以接着手工编辑的画布**。
@@ -14,6 +14,8 @@ rooyun-skill/
 │   ├── ops-vocabulary.md     # ops 词表 + 各卡型可改字段
 │   ├── video-prompt.md       # 视频提示词书写规范（视频生成必读）
 │   ├── voice-consistency.md  # 试镜定嗓，同一角色全剧一把嗓子（对白剧必读）
+│   ├── director-storyboard.md# 导演式拆镜（结果结构 / 落卡映射）+ 小说改剧本
+│   ├── remake.md             # 换人重演（1–2 人，保留场景与原声）
 │   ├── blockout.md           # 白模换角
 │   ├── assets-and-llm.md     # 素材上传 / 人工介入 / LLM 分析
 │   ├── agent-conversations.md# 多轮 Agent 会话

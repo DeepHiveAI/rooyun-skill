@@ -60,7 +60,7 @@ HTTP 状态码恒为 200**，真实状态码改放在信封的 `meta.httpStatus`
 | `token_revoked` / `token_expired` / `token_invalid` | 401 | 请用户重新签发并更新环境变量 |
 | `invalid_request` | 400 | 参数不合法，整批 fail fast，没有半批落盘。改参数，别重试。参考素材超出模型目录声明的张数 / 段数 / 合计（`video.referenceImages` 等）也会在提交时被拒（400/422，未扣费）——删减参考或换上限更高的模型 |
 | `not_found` | 404 | 不存在**或不属于本令牌**（刻意不区分，防资源探测） |
-| `rate_limited` | 429 | 退避后重试。下载端点上它还有第二种成因：**在途签名授权预算（512 MiB/令牌）被并发拉大件占满**，此时带 `meta.retryAfterSeconds`（秒），等一等或把并发降下来即可——别当成配额耗尽去换令牌 |
+| `rate_limited` | 429 | 退避后重试。下载端点上它还有第二种成因：**在途签名授权预算（512 MiB/令牌）被并发拉大件占满**，此时带 `meta.retryAfterSeconds`（秒），等一等或把并发降下来即可——别当成配额耗尽去换令牌。导演式拆镜提交时还有第三种：带 `meta.running` / `meta.maxRunning` = 每账号同时在跑的拆镜作业已满（3 个，与站内共用），处置是等在跑的作业结束（`dj storyboard-job get <jobId> --wait`）再提交，未扣费 |
 | `version_mismatch` | 409 | 你给的 `ifVersion` 已过期 → 重读 `structure` 拿新 version 再写。**盲目重试无意义** |
 | `version_conflict` | 409 | CAS 重试 3 轮仍冲突（多半是用户正在浏览器里编辑）→ 重读结构后重试 |
 | `ops_failed` | 422 | 参数合法但执行不成立；整批未落盘，看 `meta.results` 逐条定位 |
@@ -74,6 +74,10 @@ HTTP 状态码恒为 200**，真实状态码改放在信封的 `meta.httpStatus`
 | `canvas_busy` | 409 | 画布正被并发修改，标记生成中失败。**未提交任何任务**，重读结构后重试 |
 | `node_busy` | 409 | 目标卡上已有在跑的生成（用户自己发起的，或你上一笔）。**未提交任何任务**。与 `canvas_busy` 不同，**重读结构没用**——等它跑完，或换一张卡。别写成同一条重试分支，会死循环 |
 | `reference_job_active` | 409 | 你（这个账号）的拆解队列满了：1 条在跑 + 3 条排队。**未提交、没有扣费**。`meta.activeJobId` 是在跑的那条、`meta.queued` 是排队数：`dj reference-analysis <activeJobId>` 等它到终态（5–15 分钟）后再发。**不是参数错误**，别放弃也别换令牌绕 |
+| `quote_required` | 428 | 令牌开了「花钱须先报价」（新建令牌默认开），提交没带 `quoteId`。**未提交、没有扣费**。同一请求先 `dryRun:true`（生成用 `precheck`）拿 `quoteId`，告诉用户价格、确认后带上它原样提交。dj 带 `--yes` 会自动做这一步 |
+| `quote_mismatch` | 409 | 报价凭证与本次请求不符（参数改过 / 别的令牌或端点签的），或本次金额超过报价（`meta.quotedCredits` / `meta.credits`：报价后价目变了）。**未提交、没有扣费**。用当前参数重新报价并让用户**重新确认**，别拿旧凭证硬重试 |
+| `quote_expired` | 410 | 报价凭证过期（15 分钟）。**未提交、没有扣费**。重新报价；价格变了要重新征得同意 |
+| `quote_used` | 409 | 报价凭证已被一次正式提交用掉（**每个 `quoteId` 只能正式提交一次**）。**未提交、没有扣费**。要再花一次钱就重新报价并让用户确认；若是同一次提交的网络重试，用**原 `requestId`** 原样重发即可拿回原结果（不重复扣费），别换 requestId |
 | `cancel_unsupported` | 409 | 该任务没有取消通道。诚实告诉用户：等它自然结束，钱照付 |
 | `asset_not_in_cloud` | 404 | 不是 id 错了，是东西没上云 → 请用户在原设备导出 |
 | `download_quota_exceeded` | 429 | 令牌当日下载配额 5 GiB 耗尽（UTC 00:00 重置）。与上面那种 429 不同：**这个等不来**，只能等次日或换令牌（管理员账号的令牌不受此配额约束，也不回 `x-download-quota-remaining`）。302 的响应头 `x-download-quota-remaining`（当日余额）与 `x-download-grant-remaining`（在途预算余额）可用来提前节流 |
@@ -83,6 +87,10 @@ HTTP 状态码恒为 200**，真实状态码改放在信封的 `meta.httpStatus`
 | `llm_unparsable_output` | 502 | 有输出但结构不对。**已计费不退款**（token 真烧了），通常重试即可——但要知道这一次已经付过钱 |
 | `llm_output_truncated` | 502 | 产物撞输出上限被截断，残缺。**已计费不退款**，且**重试徒劳**（同样的输入与上限必然截在同一处）。拆短剧本分批处理，或换输出上限更高的模型 |
 | `session_consumed` | 409 | 编辑会话已被用掉（用户已提交过），撤销不了。改为 `edit-session status` 取回 `result` 里的蒙版继续流程 |
+| `agent_run_state` | 409 | 委托 run 当前状态不受理这个动作（在跑时批准、actionId 已过期、已取消后插话、插话队列满）。**未执行、没有扣费**。先 `dj agent-run get <runId>` 看最新状态：在跑就等；待批就用**最新**的 actionId / quoteId 重新请用户确认；已取消就新开一个 run。别拿旧 actionId 原样重试 |
+| `agent_run_plan_only` | 409 | 只出计划的委托 run（`autoGenerate:false`）批准了花钱的动作。**未执行、没有扣费**。先问用户要不要花钱：同意就 `dj agent-run steer <runId> --auto-generate "…" --yes` 升级后逐项报价确认；不同意就 reject。别自作主张升级 |
+| `agent_run_unavailable` | 403 | 创作助手对这个账号暂不可用（灰度 / 平台暂停）。令牌没问题，重建令牌没用：如实告诉用户，改用原子命令（ops + 逐项 generate）或稍后再试 |
+| `agent_run_limit_exceeded` | 429 | 这枚令牌的委托 run 数量到上限。**未执行、没有扣费**。`meta.kind=daily_runs`（今天新建满 30 个）→ 在已有 run 上 `dj agent-run steer` 继续或明天再开；`active_runs`（同时在跑满 3 个）→ `dj agent-run get <runId> --wait` 等其中一个这一轮跑完。别换令牌绕过 |
 | `conversation_busy` | 409 | 多轮会话正被另一个写方占用（`meta.lockedBy`：`api` = 上一轮还没跑完 / `web` = 用户正在网页端写同一段）。按 `meta.retryAfterSeconds` 退避，**同一个 `conversationId` + 同一个 `requestId` 原样重发**。这一轮还没扣钱；**别新建会话、别并发再打一轮**（纪律 13） |
 | `agent_not_conversational` | 400 | 该 Agent 开不了会话（编排型，要在画布里跑）。`dj agents` 里挑 `conversational: true` 的，别换个 id 盲试 |
 | `agent_unknown` | 400 | `agentId` 不在目录里、已下线，或这段会话没绑定 Agent。先 `dj agents` 抄准 id——会话建好后 Agent **不可改**，换 Agent = 新建一段会话 |

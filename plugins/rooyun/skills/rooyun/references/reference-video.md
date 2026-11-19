@@ -15,8 +15,10 @@
 ## 第一步：拿账本
 
 ```sh
-# 默认等到终态（5–15 分钟），stdout 是完整信封；--out 把 result.account 单独落成 JSON 方便反复读
-dj reference-analyze "https://v.douyin.com/xxxx/" --out ./ref/account.json --timeline-md ./ref/TIMELINE.md
+# 先报价（不带 --yes 只报价，按源视频时长计价，不扣费），把价格告诉用户、等确认
+dj reference-analyze "https://v.douyin.com/xxxx/"
+# 确认后加 --yes：默认等到终态（5–15 分钟），stdout 是完整信封；--out 把 result.account 单独落成 JSON 方便反复读
+dj reference-analyze "https://v.douyin.com/xxxx/" --yes --out ./ref/account.json --timeline-md ./ref/TIMELINE.md
 # 中断了就续查
 dj reference-analysis <jobId>
 ```
@@ -147,7 +149,7 @@ dj reference-adapt <jobId> --presenter "30 岁女兽医" --product "冻干鸡肉
 
 ```sh
 # 成片在资产库里（画布产物或你上传的），拿它的 assetId 拆一遍
-dj reference-analyze --asset <成片assetId>
+dj reference-analyze --asset <成片assetId>          # 先报价，确认后加 --yes 提交
 # 拆完拿两个 jobId 对比（纯计算，不花钱）
 dj reference-compare <参考片jobId> <成片jobId>
 ```

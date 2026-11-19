@@ -51,7 +51,7 @@ const DEFAULT_BASE = "https://www.rooyun.com";
  *
  * 它不是第二个真相源：生成脚本从 SKILL.md 派生写入，两处不一致时构建就红。
  */
-const EMBEDDED_SKILL_VERSION = "1.60.1";
+const EMBEDDED_SKILL_VERSION = "1.62.1";
 
 /**
  * 单次 HTTP 请求的**空闲**超时（毫秒）：两次收到字节之间允许的最大间隔，
@@ -82,6 +82,15 @@ const ANALYZE_POLL_MS = 15_000;
 const ANALYZE_POLL_MAX_MS = 60_000;
 /** 博主分析的默认等待上限：整条链最坏可达 30-60 分钟 */
 const DEFAULT_ANALYZE_TIMEOUT_S = 3600;
+/** 导演式拆镜 / 小说改编的轮询间隔：作业以分钟计（服务端给了 pollAfterMs 时以它为下限） */
+const JOB_POLL_MS = 10_000;
+/** 作业轮询的退避上限 */
+const JOB_POLL_MAX_MS = 30_000;
+/** 作业轮询的默认等待上限：长篇改编 / 多场拆镜最坏可达几十分钟 */
+const DEFAULT_JOB_TIMEOUT_S = 3600;
+/** 旧拆镜命令的弃用提示（stderr，一行） */
+const STORYBOARD_DEPRECATION_NOTICE =
+  "dj: ⚠️ `storyboard`（POST /v1/analyze/storyboard）已弃用，保留至少 30 天；新流程请用 `dj.mjs storyboard-job <剧本文件>`（导演式拆镜，先 --dry-run 报价）\n";
 /** 轮询间隔上限（长视频任务退避到 15s，避免高频空打） */
 const POLL_MAX_MS = 15_000;
 /** 每轮退避系数（在服务端建议值之上温和放大） */
@@ -734,6 +743,10 @@ function hintFor(status, code, meta, error) {
     case "token_limit_exceeded":
       return `本令牌消费限额已用尽（限额 ${meta?.limit ?? "?"}，已用 ${meta?.spent ?? "?"}）→ 账户里可能还有钱，请用户去 /profile#api 调额度或换一枚令牌。切勿引导用户充值。`;
     case "rate_limited":
+      // 导演式拆镜的并发名额（每账号同时 ≤3，与站内共用）：处置是等在跑的作业结束，退避重试没用
+      if (typeof meta?.maxRunning === "number") {
+        return `已有 ${meta?.running ?? "?"} 个拆镜作业在跑（每账号最多同时 ${meta.maxRunning} 个，与站内共用）→ 等它们结束（dj.mjs storyboard-job get <jobId> --wait）再提交；本次未扣费，别盲目退避重试。`;
+      }
       return (
         "触发限流，退避后重试（提交生成 10/分/令牌、20/分/账号）。" +
         (typeof meta?.retryAfterSeconds === "number"
@@ -797,6 +810,12 @@ function hintFor(status, code, meta, error) {
       return "这一次没跑成，已自动退款：等几秒后直接重试即可。";
     case "internal_error":
       return "服务内部错误：等一会（1–2 分钟）再试；多次出现就停下来，把 error.traceId（追踪号）给用户，请他联系我们。";
+    case "quote_used":
+      // 凭证一次性（服务端 2.61.0）：本次未提交、未扣费
+      return (
+        "报价凭证已用过（每个 quoteId 只能正式提交一次），本次未提交、未扣费 → 重新报价（去掉 --quote-id 让 dj 自动重新报价，或先 --quote 拿新价格）并让用户确认后再提交。" +
+        "若这是同一次提交的网络重试，用原 requestId（原幂等键）重发即可拿回原结果，别换 requestId。"
+      );
     case "service_unavailable":
       return "服务暂时不可用：稍等片刻后原样重试。";
     case "creator_upstream_failed":
@@ -821,6 +840,23 @@ function hintFor(status, code, meta, error) {
       return "该 Agent 不支持多轮会话（编排型 Agent 要在画布里跑）。用 `dj.mjs agents` 挑 conversational=true 的那些，别换个 id 盲试。";
     case "agent_unknown":
       return "agentId 不在目录里、已下线，或这段会话没绑定 Agent。先 `dj.mjs agents` 抄准 id——会话建好后 Agent **不可改**，换 Agent = 新建一段会话。";
+    case "agent_run_state":
+      return (
+        `run 当前${meta?.status ? `是 ${meta.status}，` : ""}不受理这个动作（本次未执行、未扣费）→ ` +
+        "先 `dj.mjs agent-run get <runId>` 看最新状态：在跑就 --wait 等；待批就用**最新**的 actionId / quoteId 重新请用户确认；" +
+        "已取消就新开一个 run。别拿旧 actionId 原样重试。"
+      );
+    case "agent_run_plan_only":
+      return (
+        "这个 run 是只出计划（autoGenerate:false），花钱的动作批不了（本次未执行、未扣费）→ " +
+        "**先问用户要不要花钱**：同意就 `dj.mjs agent-run steer <runId> --auto-generate \"…\" --yes` 升级后再逐项报价确认；不同意就 reject 这一项。别自作主张升级。"
+      );
+    case "agent_run_unavailable":
+      return "创作助手对这个账号暂不可用（灰度 / 平台暂停），令牌没问题、重建令牌也没用 → 如实告诉用户，改用原子工具（ops 搭卡 + 逐项 generate）完成，或稍后再试。";
+    case "agent_run_limit_exceeded":
+      return meta?.kind === "daily_runs"
+        ? "这枚令牌今天新建的委托 run 已到上限（本次未执行、未扣费）→ 别再开新 run：在已有的 run 上 `dj.mjs agent-run steer <runId> \"…\" --yes` 继续，或明天（北京时间）再开。别换令牌绕过。"
+        : "这枚令牌同时在跑的委托 run 已到上限（本次未执行、未扣费）→ 先 `dj.mjs agent-run get <runId> --wait` 等其中一个这一轮跑完再起。别换令牌绕过。";
     case "turn_incomplete":
       return "这一轮跑完了却没能落库成消息（服务端两次落库都失败）。用**同一个 requestId** 重发一次即可（幂等，不会重复扣费）；仍失败就 `dj.mjs chat history <conversationId>` 看这段会话停在哪一 seq，再决定要不要重跑。";
     default:
@@ -1601,6 +1637,7 @@ const pretty = {
       `taskId ${d.taskId}　status ${d.status}` +
         `${typeof d.progress === "number" ? `　进度 ${d.progress}%` : ""}`,
       `能力 ${d.capability ?? "-"}　落卡 ${d.landedTo ?? "-"}`,
+      d.canvasUrl ? `画布 ${d.canvasUrl}` : "",
       d.assetId ? `产物 ${d.assetId}` : "",
       d.error ? `失败原因 ${d.error}` : "",
       d.failure?.code
@@ -2276,6 +2313,87 @@ async function cmdCharacterVoices(ctx, { positional, flags }) {
   handle(ctx, await request(ctx, "PUT", path, body), pretty.characterVoices);
 }
 
+/** 秒数参数：非负有限数，否则直接失败（不让脏值进请求体） */
+function secondsFlag(flags, name, usage) {
+  const raw = flags[name];
+  const value = typeof raw === "string" ? Number(raw) : NaN;
+  if (!Number.isFinite(value) || value < 0) fail(`--${name} 需要秒数（非负数字）：${usage}`);
+  return value;
+}
+
+/**
+ * `trim <assetId> --start <秒> --end <秒> [--dry-run]`：服务端裁剪音频 / 视频资产的一段音轨成 wav 新资产（首镜定嗓 M2-5）。
+ * 免费（不扣积分），同一区间重试拿到同一个 assetId；产物可直接作为 character-voices --sample。
+ */
+async function cmdTrim(ctx, { positional, flags }) {
+  const usage = "dj.mjs trim <assetId> --start <秒> --end <秒> [--dry-run]";
+  const assetId = positional[0];
+  if (typeof assetId !== "string" || !/^[0-9a-f]{64}$/.test(assetId)) fail(`trim 需要 64 位十六进制 assetId：${usage}`);
+  const start = secondsFlag(flags, "start", usage);
+  const end = secondsFlag(flags, "end", usage);
+  if (end <= start) fail(`--end 必须大于 --start：${usage}`);
+  const body = { start, end, ...(flags["dry-run"] ? { dryRun: true } : {}) };
+  const data = handle(ctx, await request(ctx, "POST", `/assets/${assetId}/trim`, body), (d) =>
+    d.dryRun
+      ? `校验通过（未裁剪，0 积分）：${d.sourceAssetId} ${d.start}–${d.end} 秒（${d.durationSec} 秒，源 ${d.sourceMime}）`
+      : `已裁好 ${d.assetId}（wav，${d.durationSec} 秒，0 积分）`,
+  );
+  if (data?.assetId) process.stderr.write(`dj: 设为角色音色：dj.mjs character-voices <canvasId> --bind <角色名> --sample ${data.assetId}\n`);
+}
+
+/** voice-harvest 结果的人读渲染：逐角色一行结论 */
+function renderVoiceHarvest(d) {
+  if (d.dryRun) {
+    const lines = (d.lines ?? []).map((l) => `  ${l.speaker ?? (l.narration ? "旁白" : "？")}：${l.text}`);
+    return [
+      `只读校验（未转写、未切片，0 积分）· 台词来源 ${d.lineSource} · 干声分离 ${d.dryVoiceApplied === true ? "成功" : "未成功/未报告"}` +
+        ` · 句级时间戳${d.segmentsCached ? "已缓存" : "未生成（正式调用时补跑一次）"}${d.sourceMatched ? "" : " · ⚠️ 抽音轨不是这张卡当前视频的（卡片已重新出片或抽错了视频）：正式调用会被拒，先对当前视频重新抽音轨"}`,
+      ...lines,
+    ].join("\n");
+  }
+  const rows = (d.characters ?? []).map((c) =>
+    c.pass
+      ? `✅ ${c.character}  样本 ${c.sampleAssetId}  ${c.candidate?.durationSec ?? "?"} 秒  相似度 ${c.candidate?.similarity ?? "?"}${c.warnings.length ? `  ⚠️ ${c.warnings.join("；")}` : ""}`
+      : `❌ ${c.character}  ${c.reasons.join("；")} → 改走试镜`,
+  );
+  const skipped = (d.skipped ?? []).map((x) => `  跳过 ${x.speaker}：${x.reason}`);
+  return [...rows, ...skipped].join("\n");
+}
+
+/**
+ * `voice-harvest <canvasId> --node <视频卡nodeId> --extraction <v2a taskId> [--characters 甲,乙] [--dry-run]`：
+ * 首镜定嗓——从一段已出片的视频卡里给各角色切音色样本（免费、不自动绑定）。
+ * extractionId 须是这张卡**当前**视频的抽音轨：卡片重新出片后，旧抽轨在正式调用时被服务端拒（400 invalid_request）。
+ */
+async function cmdVoiceHarvest(ctx, { positional, flags }) {
+  const usage = "dj.mjs voice-harvest <canvasId> --node <视频卡nodeId> --extraction <抽音轨taskId> [--characters 甲,乙] [--dry-run]";
+  const canvasId = positional[0] ?? flags.canvas;
+  if (typeof canvasId !== "string") fail(`voice-harvest 需要 canvasId：${usage}`);
+  if (typeof flags.node !== "string") fail(`voice-harvest 需要 --node <视频卡nodeId>：${usage}`);
+  if (typeof flags.extraction !== "string") {
+    fail(`voice-harvest 需要 --extraction <抽音轨taskId>（先 dj.mjs generate 跑 capability v2a、params dryVoice=true）：${usage}`);
+  }
+  const characters =
+    typeof flags.characters === "string" ? flags.characters.split(/[,，]/).map((x) => x.trim()).filter(Boolean) : undefined;
+  const body = {
+    nodeId: flags.node,
+    extractionId: flags.extraction,
+    ...(characters && characters.length > 0 ? { characters } : {}),
+    ...(flags["dry-run"] ? { dryRun: true } : {}),
+  };
+  const data = handle(ctx, await request(ctx, "POST", `/canvases/${encodeURIComponent(canvasId)}/voice-harvest`, body), renderVoiceHarvest);
+  const passed = (data?.characters ?? []).filter((c) => c.pass);
+  if (passed.length > 0) {
+    process.stderr.write(
+      "dj: 样本还**没有绑定**。先让用户试听（node scripts/download.mjs --asset <sampleAssetId> 下载到本地），确认后逐个绑定：\n" +
+        passed
+          .map((c) => `  dj.mjs character-voices ${canvasId} --bind ${c.character} --sample ${c.sampleAssetId} --label "${data.bindingLabel ?? "首镜样本"}"`)
+          .join("\n") +
+        "\n",
+    );
+  }
+}
+
 /** 详读单卡：正文全文 + 可写参数快照 + 直接上下游（存量分镜表卡另出全部行） */
 async function cmdNode(ctx, { positional, flags }) {
   const canvasId = positional[0] ?? flags.canvas;
@@ -2324,11 +2442,16 @@ async function cmdExtract(ctx, { positional, flags }) {
       ...modelOverride(flags),
     };
   }
-  handle(ctx, await request(ctx, "POST", "/analyze/extract", body), pretty.extract);
+  const quoteId = await autoDryRunQuoteId(ctx, flags, "/analyze/extract", body);
+  handle(ctx, await request(ctx, "POST", "/analyze/extract", withQuoteId(body, quoteId)), pretty.extract);
 }
 
-/** 剧本 → 结构化分镜（只返数据，不落卡） */
+/**
+ * 剧本 → 结构化分镜（只返数据，不落卡）。
+ * 已弃用：旧 `POST /v1/analyze/storyboard` 保留 ≥30 天，新流程走 `storyboard-job`（导演式拆镜）。
+ */
 async function cmdStoryboard(ctx, { flags }) {
+  process.stderr.write(STORYBOARD_DEPRECATION_NOTICE);
   let body;
   if (typeof flags.file === "string") {
     body = await readJsonInput(flags, "storyboard 请求体");
@@ -2391,7 +2514,8 @@ async function cmdStoryboard(ctx, { flags }) {
       ...modelOverride(flags),
     };
   }
-  handle(ctx, await request(ctx, "POST", "/analyze/storyboard", body), pretty.storyboard);
+  const quoteId = await autoDryRunQuoteId(ctx, flags, "/analyze/storyboard", body);
+  handle(ctx, await request(ctx, "POST", "/analyze/storyboard", withQuoteId(body, quoteId)), pretty.storyboard);
 }
 
 /**
@@ -2590,7 +2714,8 @@ async function cmdCaption(ctx, { positional, flags }) {
       };
     }
   }
-  handle(ctx, await request(ctx, "POST", "/analyze/caption", body), pretty.caption);
+  const quoteId = await autoDryRunQuoteId(ctx, flags, "/analyze/caption", body);
+  handle(ctx, await request(ctx, "POST", "/analyze/caption", withQuoteId(body, quoteId)), pretty.caption);
 }
 
 /**
@@ -2624,7 +2749,8 @@ async function cmdInspect(ctx, { positional, flags }) {
       ...(listFlag(flags, "dimensions") ? { dimensions: listFlag(flags, "dimensions") } : {}),
     };
   }
-  handle(ctx, await request(ctx, "POST", "/analyze/inspect", body), pretty.inspect);
+  const quoteId = await autoDryRunQuoteId(ctx, flags, "/analyze/inspect", body);
+  handle(ctx, await request(ctx, "POST", "/analyze/inspect", withQuoteId(body, quoteId)), pretty.inspect);
 }
 
 /** 改写 / 优化 / 翻译 / 写词 */
@@ -2657,7 +2783,8 @@ async function cmdRewrite(ctx, { positional, flags }) {
       ...modelOverride(flags),
     };
   }
-  handle(ctx, await request(ctx, "POST", "/analyze/rewrite", body), pretty.rewrite);
+  const quoteId = await autoDryRunQuoteId(ctx, flags, "/analyze/rewrite", body);
+  handle(ctx, await request(ctx, "POST", "/analyze/rewrite", withQuoteId(body, quoteId)), pretty.rewrite);
 }
 
 /** 直传 PUT 的超时：50MB 在慢网下也够；超时即回落 multipart，不卡死 */
@@ -2967,7 +3094,9 @@ async function cmdGenerate(ctx, { flags }) {
     fail(`requestId 必须是 36 位 uuid 形态，收到：${body.requestId}`);
   }
 
-  handle(ctx, await request(ctx, "POST", "/generations", body), pretty.submitted);
+  // 报价凭证：precheck 与提交同形（requestId 不计），取 items[0].quoteId
+  const quoteId = await autoQuoteId(ctx, flags, "/generations/precheck", { items: [body] }, (data) => data?.items?.[0]?.quoteId);
+  handle(ctx, await request(ctx, "POST", "/generations", withQuoteId(body, quoteId)), pretty.submitted);
 }
 
 /** 轮询到终态：间隔取 max(服务端建议, 3s)，逐轮温和退避，撞 429 加倍退避 */
@@ -3262,16 +3391,9 @@ async function chatSend(ctx, positional, flags) {
     ...(typeof flags.model === "string" ? { modelId: flags.model } : {}),
     ...(params ? { params } : {}),
   };
-  handle(
-    ctx,
-    await request(
-      ctx,
-      "POST",
-      `/conversations/${encodeURIComponent(conversationId)}/messages`,
-      body,
-    ),
-    pretty.chatTurn,
-  );
+  const turnPath = `/conversations/${encodeURIComponent(conversationId)}/messages`;
+  const quoteId = await autoDryRunQuoteId(ctx, flags, turnPath, body);
+  handle(ctx, await request(ctx, "POST", turnPath, withQuoteId(body, quoteId)), pretty.chatTurn);
 }
 
 /**
@@ -4025,6 +4147,11 @@ const HELP = `dj.mjs · RooYun 开放 API v1 客户端（零依赖，Node ≥ 18
                                         增量写绑定（角色名必须与 knownCharacters 逐字一致——
                                         写错不报错但生成时静默不注入，服务端会顶回去 404）。
                                         试镜定嗓全流程见 SKILL.md「角色音色一致性」一章
+  voice-harvest <canvasId> --node <视频卡nodeId> --extraction <抽音轨taskId> [--characters 甲,乙] [--dry-run]
+                                        首镜定嗓：从已出片的对白段切各角色音色样本（免费，不自动绑定；
+                                        先对这张卡的视频跑 v2a 抽音轨 dryVoice=true）。未过质量闸的角色改走试镜
+  trim <assetId> --start <秒> --end <秒> [--dry-run]
+                                        服务端裁剪音频 / 视频资产的一段音轨成 wav 新资产（免费）
 
   projects list [--limit N] [--offset N]
   projects create <name>                建项目（同时得到首画布 canvasId 与浏览器 url）
@@ -4068,6 +4195,8 @@ const HELP = `dj.mjs · RooYun 开放 API v1 客户端（零依赖，Node ≥ 18
              [--anchors <anchors.json>] [--bible <圣经文件>]
              [--segment-max-sec <2-15>] [--segment-min-sec <1-15>]
              [--video-model <出片模型id>] [--model <id>] | [-f body.json]
+                                        ⚠️ 已弃用（旧 analyze/storyboard 保留 ≥30 天）：新流程用
+                                        下面的 storyboard-job（导演式拆镜）。
                                         剧本 → 结构化分镜（场景→镜头两级）。同样不落卡。
                                         --anchors：extract characters 的 shotInjection 映射成
                                         [{name,anchor}]（不传则每镜重新想象角色长相）。
@@ -4097,6 +4226,50 @@ const HELP = `dj.mjs · RooYun 开放 API v1 客户端（零依赖，Node ≥ 18
                                         分镜图质检。判角色一致性要传分组过的定妆照，
                                         用 -f body.json 传 context.characterRefs
 
+  —— 导演式拆镜 / 小说改剧本（需 llm scope；**扣积分**，默认只报价）——
+  所有花钱命令：不带 --yes（或带 --dry-run）只报价、不提交、不扣费；
+  把报价告诉用户、等确认后加 --yes 再跑同一条命令。
+  报价凭证：正式提交前 dj 会自动先报价一次拿 quoteId 再带着提交（令牌开了「花钱须先报价」时必需）；
+  也可用 --quote-id <id> 直接带上之前报价拿到的凭证（参数须与报价时一致，15 分钟有效）。
+
+  storyboard-job <剧本文件|-> [--canvas <canvasId>] [--video-model <出片模型id>] [--aspect 9:16]
+                 [--dry-run | --yes] [--request-id <幂等键>] [--wait] [--timeout <秒>] [--out result.json]
+                                        导演式拆镜（异步作业）：剧本 → 设定 + 场→片段→镜。
+                                        --canvas 只读画布上已有设定卡，让镜头文字与之同名同貌（不落卡）。
+                                        报价 = 实扣上限，成功按实际字数结算退差额；每账号最多同时 3 个。
+                                        例：dj.mjs storyboard-job ep01.txt --video-model <id> --aspect 9:16
+                                            dj.mjs storyboard-job ep01.txt --video-model <id> --aspect 9:16 --yes --wait --out sb.json
+  storyboard-job get <jobId> [--wait] [--timeout <秒>] [--out result.json]
+                                        查作业（免费）。done 后按 references/director-storyboard.md 落卡；
+                                        contentAccess=excerpt（失败节选）不能落卡
+
+  adapt <小说txt文件|-> [--title "书名"] [--episode-sec 60|90|120]
+        [--density brisk|standard|dense|condensed] [--genre-guide <题材包id>]
+        [--dry-run | --yes] [--request-id <幂等键>] [--wait] [--out <目录>]
+                                        小说改剧本（异步作业，自动在写作台建小说 + 剧本文稿）。
+                                        报价是上限 maxCredits：按批冻结、按实际用量结算。
+                                        题材包 id 如 urban-revenge / rebirth-revenge / xianxia（填错服务端回 400 并列全集）
+                                        例：dj.mjs adapt novel.txt --title "示例" --episode-sec 90
+  adapt get <adaptationId> [--wait] [--out <目录>]
+                                        查作业（免费）。--out 把每集剧本写成 <目录>/ep01.txt…，
+                                        再逐集 storyboard-job。paused = 去站内写作台（webPath）继续/重试
+
+  —— 换人重演（需 generate scope；**扣积分**，默认只报价）——
+  remake --source <源视频assetId> --keyframe <参考帧assetId>[:<帧位>[:<人物>]] [--keyframe …]
+         [--lip-sync] [--canvas <canvasId> --node <nodeId>] [--sku rm_swap_fast]
+         [--dry-run | --yes --request-id <uuid>] | [-f body.json]
+                                        把源视频里 1–2 个人换成你的角色，保留场景 / 动作 / 运镜，成片用原声。
+                                        参考帧 = 源片某一帧把人换好后的整帧图，**要你先画好**
+                                        （t2i + 参考图：源帧 + 角色设定图，正常计费），最多 2 张。
+                                        帧位：整数 = 第几帧（24fps，0 起），或秒数如 3.5s；缺省 0。
+                                        人物：序号@x[,y]，x/y 是画面中的水平/垂直位置比例 0–1，
+                                        多人用 + 连接；只给一张参考帧时可省，默认 1@0.5。
+                                        --lip-sync：跟原声对口型（缺省跟原片动作）。
+                                        正式提交与 generate 一样必须带 --request-id（dj.mjs uuid）。
+                                        查进度：dj.mjs task <taskId> --watch
+                                        例：dj.mjs remake --source <vid> --keyframe <img>:0:1@0.5
+                                            dj.mjs remake --source <vid> --keyframe <imgA>:0:1@0.3 --keyframe <imgB>:4s:1@0.3+2@0.7 --lip-sync
+
   —— 多轮 Agent 会话（纪律 13；需 llm scope；**每轮扣积分**）——
   agents                                Agent 目录：id / conversational / billing.stagesPerTurn。
                                         报价直接读 chat new / chat show 的 meta.estimatedTurnCredits
@@ -4125,6 +4298,32 @@ const HELP = `dj.mjs · RooYun 开放 API v1 客户端（零依赖，Node ≥ 18
   chats [--agent <agentId>] [--limit N] [--offset N]
                                         列会话（**上下文丢了就用它**，含网页端建的）。
                                         别新建会话重头说一遍——那是重付每一轮的钱
+
+  —— 委托画布创作助手（起 run / 插话 / 批准·拒绝需 llm + projects:read + canvas:write；批准花钱动作另需 generate；
+     查询 / 取消只需 llm；**每轮扣模型费，并计入本令牌的总额度与日额度**）——
+  复杂多步任务（搭整套画布、按剧本出分镜再生成）交给创作助手在画布上做；原子命令用于精修。
+  花钱的每一步都停在 awaiting_approval，**必须用户本人逐项确认**后带该项 quoteId 批准；dj 不替用户批准。
+  每个令牌每天最多新建 30 个 run、同时在跑最多 3 个（429 agent_run_limit_exceeded）。
+  run 归属账号：同账号的其他令牌也能查询 / 插话 / 批准 / 取消它。
+  agent-run start <canvasId> "<要助手做的事>" [--auto-generate] [--dry-run | --yes]
+                  [--request-id <uuid>] [--quote-id <id>] [--wait] [--timeout <秒>]
+                                        委托一件事（不带 --yes 只报价首轮模型费上限）。
+                                        缺省只出计划、搭卡，不批准任何生成；--auto-generate 才允许生成
+                                        （仍逐项批准）。幂等键缺省现取一个，重试原样带上
+  agent-run get <runId> [--wait] [--timeout <秒>]
+                                        查状态（免费）。--wait 按 pollAfterMs 轮询，停在
+                                        awaiting_approval（列出待批项：actionId / 描述 / 报价 credits+turnCredits /
+                                        quoteId / 过期时间 / 能否批准）或终态 completed / failed / cancelled
+  agent-run approve <runId> <actionId> --quote-id <quoteId> [--note "…"]
+                                        批准一项（**用户本人确认价格后**；quoteId 只在 get 里签、15 分钟有效）。
+                                        同批待批项全部答完才继续
+  agent-run reject <runId> <actionId> [--note "原因"]
+                                        拒绝一项（免费，原因交给助手）
+  agent-run steer <runId> "<补充要求>" [--auto-generate] [--dry-run | --yes] [--request-id <幂等键>] [--wait]
+                                        插话（起一轮，扣模型费，不带 --yes 只报价）。助手空闲时立即起轮并
+                                        **作废**未处理的待批项；在跑时排队到本轮结束。--auto-generate 只升不降。
+                                        幂等键缺省现取一个，重试原样带上不会重复注入；插话报错 = 这句没注入
+  agent-run cancel <runId>              软取消：在跑的一轮跑完即止，之后不再起轮；已批准提交的生成照常结算
 
   —— 人工介入编辑（纪律 9；需 canvas:write）——
   edit-session create <canvasId> <nodeId> [--hint "预填的要求"] [--ttl <1-15 分钟>]
@@ -4177,13 +4376,13 @@ const HELP = `dj.mjs · RooYun 开放 API v1 客户端（零依赖，Node ≥ 18
   video-url <链接或口令>                  抖音**单条视频**链接 → 可直接下载的视频直链
                                           （主页链接当前拿不到列表，见纪律 15）
                                         （不转存；curl -L 即可下，直链数周内失效，拿到就下）
-  creator-analyze <secUid> <videoId> <videoId> … [--no-wait] [--timeout <秒>] [--request <幂等键>]
-                                        发起分析并等到终态（默认等，间隔 ${ANALYZE_POLL_MS / 1000}s）。
+  creator-analyze <secUid> <videoId> <videoId> … [--dry-run | --yes] [--no-wait] [--timeout <秒>] [--request <幂等键>]
+                                        ★扣积分，默认只报价：确认后加 --yes 发起并等到终态（间隔 ${ANALYZE_POLL_MS / 1000}s）。
                                         **videoIds 必须点名**：不给则服务端要拉主页作品列表，
                                         而该接口已被抖音封禁，大概率回 502（见纪律 15）
   creator-analysis <jobId>              查一次分析进度（不等）
-  reference-analyze (<链接|口令|视频id> | --asset <assetId>) [--no-wait] [--timeout <秒>] [--request <幂等键>] [--out account.json] [--timeline-md TIMELINE.md]
-                                        拆解一条参考视频为逐镜「分段实现账」（默认等到终态，5–15 分钟）
+  reference-analyze (<链接|口令|视频id> | --asset <assetId>) [--dry-run | --yes] [--no-wait] [--timeout <秒>] [--request <幂等键>] [--out account.json] [--timeline-md TIMELINE.md]
+                                        拆解一条参考视频为逐镜「分段实现账」（默认只报价；加 --yes 提交并等到终态，5–15 分钟）
                                         ★扣积分 0.1/秒 × 源视频时长（后续改编不另收费，失败自动退款）
   reference-analysis <jobId> [--out …] [--timeline-md …]   查一次拆解进度（不等）
   reference-compare <参考片jobId> <成片jobId>  复刻验收：结构 diff（纯计算，不花钱）
@@ -4344,17 +4543,21 @@ async function cmdCreatorAnalyze(ctx, { positional, flags }) {
 
   // 幂等键：`--request-id` 与 generate 同名（那边是必填），这里可省——省了就随机生成。
   // 它的作用范围是**跨进程重跑**：同一个键重发不会让 GPU 白跑两遍
+  const analysisBody = { secUid, ...(videoIds.length > 0 ? { videoIds } : {}) };
+  // 先报价闸（与 storyboard-job 同）：带 --dry-run 或没带 --yes 都只报价，不扣费、不解析博主、不建任务
+  if (quoteOnly(flags)) {
+    handle(ctx, await request(ctx, "POST", "/creator-analyses", { ...analysisBody, dryRun: true }));
+    printQuoteNextStep(flags);
+    return;
+  }
   const requestId =
     typeof flags["request-id"] === "string"
       ? flags["request-id"]
       : typeof flags.request === "string"
         ? flags.request
         : randomUUID();
-  const submitResult = await request(ctx, "POST", "/creator-analyses", {
-    secUid,
-    ...(videoIds.length > 0 ? { videoIds } : {}),
-    requestId,
-  });
+  const quoteId = await autoDryRunQuoteId(ctx, flags, "/creator-analyses", analysisBody);
+  const submitResult = await request(ctx, "POST", "/creator-analyses", withQuoteId({ ...analysisBody, requestId }, quoteId));
 
   // 只提交不等：提交信封就是本次调用的产物，正常落 stdout
   if (flags["no-wait"]) {
@@ -4493,16 +4696,21 @@ async function cmdReferenceAnalyze(ctx, { positional, flags }) {
     fail("reference-analyze 需要一条抖音**单条视频**的分享链接、口令全文或视频 id（主页链接不行，要拆博主用 creator-analyze）；拆自己的成片用 --asset <assetId>");
   }
   if (input && assetId) fail("--asset 与视频链接二选一，不能同时给");
+  const target = assetId ? { assetId } : { input };
+  // 先报价闸（与 storyboard-job 同）：带 --dry-run 或没带 --yes 都只报价（按源视频时长计价），不扣费、不建任务
+  if (quoteOnly(flags)) {
+    handle(ctx, await request(ctx, "POST", "/reference-decompositions", { ...target, dryRun: true }));
+    printQuoteNextStep(flags);
+    return;
+  }
   const requestId =
     typeof flags["request-id"] === "string"
       ? flags["request-id"]
       : typeof flags.request === "string"
         ? flags.request
         : randomUUID();
-  const submitResult = await request(ctx, "POST", "/reference-decompositions", {
-    ...(assetId ? { assetId } : { input }),
-    requestId,
-  });
+  const quoteId = await autoDryRunQuoteId(ctx, flags, "/reference-decompositions", target);
+  const submitResult = await request(ctx, "POST", "/reference-decompositions", withQuoteId({ ...target, requestId }, quoteId));
 
   if (flags["no-wait"]) {
     handle(ctx, submitResult, pretty.referenceSubmitted);
@@ -4591,7 +4799,8 @@ async function cmdVideoAnalyze(ctx, { positional, flags }) {
     return;
   }
   const requestId = typeof flags.request === "string" ? flags.request : randomUUID();
-  const submitted = await request(ctx, "POST", "/video-analyses", { ...target, requestId });
+  const quoteId = await autoDryRunQuoteId(ctx, flags, "/video-analyses", target);
+  const submitted = await request(ctx, "POST", "/video-analyses", withQuoteId({ ...target, requestId }, quoteId));
   const data = submitted.envelope?.data;
   // 失败 / --no-wait / 已终态（缓存命中直接出结果）都不必轮询
   if (submitted.status < 200 || submitted.status >= 300 || !submitted.envelope?.ok || flags["no-wait"] || data?.status === "done" || data?.status === "failed") {
@@ -5372,6 +5581,701 @@ async function cmdLogout(ctx) {
   );
 }
 
+// ---------------------------------------------------------------------------
+// 导演式拆镜 / 换人重演 / 小说改剧本（OpenAPI P2：storyboard-jobs / remakes / adaptations）
+// ---------------------------------------------------------------------------
+
+/**
+ * 花钱命令的「先报价」闸：带 --dry-run，或**没带 --yes**，都只报价不提交。
+ *
+ * 与 video-analyze 的 `--quote` 同一个用意（纪律 1：生成前必须报价并等用户确认），
+ * 区别是这里默认就是报价——忘了加开关的结果是「多报一次价」，而不是「直接扣钱」。
+ */
+function quoteOnly(flags) {
+  return Boolean(flags["dry-run"]) || !flags.yes;
+}
+
+function printQuoteNextStep(flags) {
+  process.stderr.write(
+    flags["dry-run"]
+      ? "dj: 以上是报价（dryRun：未提交、未扣费）。把报价告诉用户、等确认后去掉 --dry-run、加 --yes 再跑同一条命令。\n"
+      : "dj: 没带 --yes，只做了报价（未提交、未扣费）。把报价告诉用户、等确认后加 --yes 再跑同一条命令。\n",
+  );
+}
+
+/** 读位置参数指定的纯文本文件；缺省或 `-` 读 stdin */
+async function readTextArg(pathOrDash, what, usage) {
+  if (typeof pathOrDash === "string" && pathOrDash !== "-") {
+    try {
+      const text = readFileSync(pathOrDash, "utf8");
+      if (!text.trim()) fail(`${pathOrDash} 是空文件，期待${what}`);
+      return text;
+    } catch (err) {
+      fail(`读取 ${pathOrDash} 失败：${err instanceof Error ? err.message : "unknown"}`);
+    }
+  }
+  if (process.stdin.isTTY) fail(`缺少${what}：${usage}`);
+  const chunks = [];
+  for await (const chunk of process.stdin) chunks.push(chunk);
+  const text = Buffer.concat(chunks).toString("utf8").trim();
+  if (!text) fail(`stdin 为空，期待${what}`);
+  return text;
+}
+
+/** 幂等键：显式给就用（重试原样复用），没给现取一个并在 stderr 打出来 */
+function jobRequestId(flags) {
+  const given = flags["request-id"];
+  if (typeof given === "string" && given.trim()) return { requestId: given.trim(), generated: false };
+  return { requestId: randomUUID(), generated: true };
+}
+
+/**
+ * 报价凭证（服务端 2.59.0）：正式提交前先静默报价一次（dryRun:true 或 generate 的 precheck，不扣费）拿 quoteId，
+ * 再带着它提交——令牌开了「花钱须先报价」（新建令牌默认开）时不带凭证会被 428 拒。
+ * 用户确认的语义不在这里：带 --yes 的命令由「不带 --yes 只报价」保证，其余命令由纪律 1 的先报价再确认保证。
+ * --quote-id 显式给了就直接用（跳过自动报价）；报价失败按原错误退出（未扣费）；服务端没回 quoteId（旧版）就照旧提交。
+ */
+async function autoQuoteId(ctx, flags, path, body, pick = (data) => data?.quoteId) {
+  const given = flags["quote-id"];
+  if (typeof given === "string" && given.trim()) return given.trim();
+  const quote = await request(ctx, "POST", path, body);
+  const realStatus = Number(quote.envelope?.meta?.httpStatus) || quote.status;
+  if (realStatus < 200 || realStatus >= 300 || !quote.envelope?.ok) handle(ctx, quote);
+  const quoteId = pick(quote.envelope?.data);
+  if (typeof quoteId !== "string" || !quoteId) return undefined;
+  const data = quote.envelope.data ?? {};
+  const credits = data.credits ?? data.maxCredits ?? data.items?.[0]?.credits;
+  process.stderr.write(`dj: 已自动报价${typeof credits === "number" ? ` ${credits} 积分` : ""}并取得报价凭证（15 分钟有效），正式提交……\n`);
+  return quoteId;
+}
+
+/** 有凭证才带 quoteId 字段（返回新对象） */
+function withQuoteId(body, quoteId) {
+  return quoteId ? { ...body, quoteId } : body;
+}
+
+/** 走 dryRun 的花钱端点：同一请求体加 dryRun:true 报价 */
+function autoDryRunQuoteId(ctx, flags, path, body) {
+  return autoQuoteId(ctx, flags, path, { ...body, dryRun: true });
+}
+
+/**
+ * 通用作业轮询：间隔取 max(服务端 pollAfterMs, 下限) 逐轮温和退避，429 加倍退避；
+ * 到终态输出信封并按成败给退出码，超时给续查命令（退出码 6，不代表失败）。
+ */
+async function pollJob(ctx, flags, { path, renderer, isTerminal, isSuccess, describe, resumeCommand, onFinal }) {
+  const timeoutMs = intFlag(flags, "timeout", DEFAULT_JOB_TIMEOUT_S) * 1000;
+  const deadline = Date.now() + timeoutMs;
+  let interval = 0;
+  let last = null;
+  for (;;) {
+    const result = await request(ctx, "GET", path);
+    if (result.status === 429) {
+      interval = Math.min(Math.max(interval, JOB_POLL_MS) * 2, JOB_POLL_MAX_MS * 2);
+      if (Date.now() + interval > deadline) break;
+      await sleep(interval);
+      continue;
+    }
+    if (result.status < 200 || result.status >= 300 || !result.envelope?.ok) {
+      handle(ctx, result, renderer);
+      return;
+    }
+    last = result;
+    const d = result.envelope.data;
+    if (isTerminal(d)) {
+      emit(ctx, result.envelope, renderer);
+      onFinal?.(d);
+      process.exit(isSuccess(d) ? EXIT.ok : EXIT.taskNotSucceeded);
+    }
+    const suggested = Number(d?.pollAfterMs);
+    const floor = Number.isFinite(suggested) && suggested > 0 ? Math.max(suggested, POLL_MIN_MS) : JOB_POLL_MS;
+    // 首轮按服务端建议（没有则 10s），之后逐轮温和放大，封顶 30s
+    interval = Math.min(Math.max(floor, Math.round(interval * POLL_BACKOFF)), JOB_POLL_MAX_MS);
+    if (ctx.pretty) process.stderr.write(`dj: ${describe(d)}，${interval}ms 后再查\n`);
+    if (Date.now() + interval > deadline) break;
+    await sleep(interval);
+  }
+  if (last) emit(ctx, last.envelope, renderer);
+  process.stderr.write(
+    `dj: 等待超时（${Math.round(timeoutMs / 1000)}s），作业仍在进行——不是失败，稍后用 \`${resumeCommand}\` 再查。\n`,
+  );
+  process.exit(EXIT.watchTimeout);
+}
+
+function writeJobResultFile(file, data) {
+  mkdirSync(pathDirname(file), { recursive: true });
+  writeFileSync(file, `${JSON.stringify(data, null, 2)}\n`, "utf8");
+}
+
+const prettyJobs = {
+  storyboardQuote: (d) =>
+    [
+      `报价  ${d.credits} 积分（按 ${d.chars} 字计；上限 ${d.maxChars} 字）`,
+      `余额  ${d.balance}`,
+      d.overLimit ? `⚠️ 超出上限：${d.message ?? "剧本过长"}——按集拆开分别提交` : "",
+      "※ 报价 = 实扣上限：成功按实际拆成镜头的字数结算、差额退回；失败无结果整笔退回。",
+    ]
+      .filter(Boolean)
+      .join("\n"),
+  storyboardJob: (d) => {
+    const scenes = d.result?.scenes ?? [];
+    const segments = scenes.reduce((n, s) => n + (s.segments?.length ?? 0), 0);
+    const progress = d.progress
+      ? `${d.progress.phase ? `${d.progress.phase} ` : ""}${d.progress.done}/${d.progress.total}`
+      : "";
+    return [
+      `作业  ${d.jobId}${d.deduplicated ? "（命中幂等，复用既有作业）" : ""}`,
+      `状态  ${d.status}${d.stage ? `（${d.stage}）` : ""}${progress ? `  进度 ${progress}` : ""}`,
+      typeof d.chargedCredits === "number" ? `预收  ${d.chargedCredits} 积分（按 ${d.chars} 字）` : "",
+      d.charge
+        ? `账单  报价 ${d.charge.quotedCredits}｜${d.charge.status}${d.charge.paidCredits !== undefined ? `｜实付 ${d.charge.paidCredits}` : ""}${d.charge.refundedCredits !== undefined ? `｜退回 ${d.charge.refundedCredits}` : ""}`
+        : "",
+      d.error ? `错误  ${d.error}` : "",
+      d.result
+        ? `结果  ${scenes.length} 场 / ${segments} 段；设定 角色 ${d.result.settings?.characters?.length ?? 0}·场景 ${d.result.settings?.scenes?.length ?? 0}·道具 ${d.result.settings?.props?.length ?? 0}；缺参考 ${d.result.missingRefs?.length ?? 0}；核对问题 ${d.result.issues?.length ?? 0}`
+        : "",
+      d.contentAccess === "excerpt" ? "⚠️ 只有节选（失败未付费）：片段正文为空，不能用来落卡" : "",
+    ]
+      .filter(Boolean)
+      .join("\n");
+  },
+  remakeQuote: (d) =>
+    [
+      d.enabled === false || d.credits === null
+        ? "报价  平台未开启计费（本单不扣积分）"
+        : `报价  ${d.credits} 积分（成片 ${d.outputSeconds} 秒）`,
+      d.enabled === false ? "" : `余额  ${d.balance}（可用 ${d.available}）${d.ok ? "" : "  ⚠️ 不够"}`,
+      `换人  ${d.personCount} 人｜参考帧 ${d.keyframeCount} 张｜${d.lipSync ? "对口型（跟原声）" : "跟原片动作（不对口型）"}｜成片用原声`,
+    ]
+      .filter(Boolean)
+      .join("\n"),
+  remakeSubmitted: (d) =>
+    [
+      `任务  ${d.taskId}${d.deduplicated ? "（命中幂等，复用既有任务）" : ""}`,
+      `状态  ${d.status ?? "-"}`,
+      `换人  ${d.personCount} 人｜参考帧 ${d.keyframeCount} 张｜成片 ${d.outputSeconds} 秒`,
+      "",
+      `查进度：dj.mjs task ${d.taskId} --watch`,
+    ]
+      .filter((line) => line !== undefined)
+      .join("\n"),
+  adaptQuote: (d) =>
+    [
+      `报价  最多 ${d.maxCredits} 积分（按批冻结、按实际用量结算，总扣费不超过它）`,
+      `余额  ${d.balance}${d.enough ? "" : `  ⚠️ 不够，还差 ${d.shortBy}`}`,
+      `原文  ${d.totalChars} 字｜${d.chapters} 章｜${d.batches} 批`,
+      `预计  ${d.episodes?.min}–${d.episodes?.max} 集｜每集 ${d.episodeSec} 秒｜密度 ${d.density}｜题材包 ${d.genreGuide ?? "无"}`,
+    ].join("\n"),
+  adaptation: (d) =>
+    [
+      `作业  ${d.adaptationId}${d.deduplicated ? "（命中幂等，复用既有作业）" : ""}`,
+      `状态  ${d.status}${d.pausedReason ? `（${d.pausedReason}）` : ""}`,
+      d.progress ? `进度  批 ${d.progress.batchesDone}/${d.progress.batchesTotal}｜已出 ${d.progress.episodesDone} 集` : "",
+      `扣费  ${d.chargedCredits ?? 0} / 上限 ${d.maxCredits ?? "-"} 积分`,
+      d.failure ? `失败  ${d.failure.message}` : "",
+      d.qc?.length ? `质检  ${d.qc.length} 条（只供参考，不影响扣费）` : "",
+      d.script ? `剧本  ${d.script.title}｜${d.script.episodes.length} 集` : "",
+      d.webPath ? `站内  ${d.webPath}` : "",
+    ]
+      .filter(Boolean)
+      .join("\n"),
+};
+
+const STORYBOARD_JOB_TERMINAL = new Set(["done", "failed", "cancelled", "discarded"]);
+
+/** 拆镜作业到手后的提示：节选不可落卡、怎么落卡、--out 落盘 */
+function afterStoryboardJob(ctx, flags, d) {
+  if (!d) return;
+  if (typeof flags.out === "string" && d.result) {
+    writeJobResultFile(flags.out, d);
+    process.stderr.write(`dj: 作业结果已写入 ${flags.out}\n`);
+  }
+  if (d.contentAccess === "excerpt") {
+    process.stderr.write("dj: 作业失败、只有节选（片段正文为空）——不能用来落卡；改剧本后重新提交，或到站内处理。\n");
+    return;
+  }
+  if (d.status === "done") {
+    process.stderr.write(
+      "dj: 落卡：先建 result.settings 的设定板，再把每场 scenes[].segments[] 按 references/director-storyboard.md 的映射用 `dj.mjs ops <canvasId>` 落成 createStoryboard。\n",
+    );
+  }
+}
+
+/**
+ * `storyboard-job <剧本文件|-> [--canvas id] [--video-model id] [--aspect 9:16] [--dry-run|--yes] [--request-id] [--wait]`
+ * `storyboard-job get <jobId> [--wait] [--out result.json]`
+ */
+async function cmdStoryboardJob(ctx, { positional, flags }) {
+  if (positional[0] === "get") return cmdStoryboardJobGet(ctx, positional.slice(1), flags);
+  const script = await readTextArg(positional[0], "剧本正文", "dj.mjs storyboard-job <剧本文件>（或 - 从 stdin 读）");
+  const aspectRatio = typeof flags.aspect === "string" ? flags.aspect.trim() : undefined;
+  if (aspectRatio !== undefined && !/^\d{1,3}:\d{1,3}$/.test(aspectRatio)) fail(`--aspect 形如 9:16，收到：${aspectRatio}`);
+  const body = {
+    script,
+    ...(typeof flags.canvas === "string" ? { canvasId: flags.canvas } : {}),
+    ...(typeof flags["video-model"] === "string" ? { videoModelId: flags["video-model"] } : {}),
+    ...(aspectRatio ? { aspectRatio } : {}),
+  };
+  if (quoteOnly(flags)) {
+    const quote = handle(ctx, await request(ctx, "POST", "/storyboard-jobs", { ...body, dryRun: true }), prettyJobs.storyboardQuote);
+    if (quote?.overLimit) process.stderr.write("dj: 剧本超出拆镜上限——按集拆开分别报价提交（小说改编产物用 adapt get --out 逐集落盘）。\n");
+    printQuoteNextStep(flags);
+    return;
+  }
+  const { requestId, generated } = jobRequestId(flags);
+  const quoteId = await autoDryRunQuoteId(ctx, flags, "/storyboard-jobs", body);
+  const submitted = await request(ctx, "POST", "/storyboard-jobs", withQuoteId({ ...body, requestId }, quoteId));
+  const data = submitted.envelope?.data;
+  if (!flags.wait || submitted.status < 200 || submitted.status >= 300 || !submitted.envelope?.ok || typeof data?.jobId !== "string") {
+    handle(ctx, submitted, prettyJobs.storyboardJob);
+  }
+  process.stderr.write(
+    `dj: 已提交 jobId=${data.jobId}${generated ? `（幂等键 --request-id ${requestId}：网络中断重试时原样带上，不会重复扣费）` : ""}；` +
+      `查进度 \`dj.mjs storyboard-job get ${data.jobId} --wait\`。每账号最多同时 3 个拆镜作业。\n`,
+  );
+  if (flags.wait) await waitStoryboardJob(ctx, flags, data.jobId);
+}
+
+async function cmdStoryboardJobGet(ctx, positional, flags) {
+  const jobId = positional[0];
+  if (typeof jobId !== "string") fail("storyboard-job get 需要 jobId：dj.mjs storyboard-job get <jobId> [--wait]");
+  if (flags.wait) return waitStoryboardJob(ctx, flags, jobId);
+  const data = handle(ctx, await request(ctx, "GET", `/storyboard-jobs/${encodeURIComponent(jobId)}`), prettyJobs.storyboardJob);
+  afterStoryboardJob(ctx, flags, data);
+}
+
+function waitStoryboardJob(ctx, flags, jobId) {
+  return pollJob(ctx, flags, {
+    path: `/storyboard-jobs/${encodeURIComponent(jobId)}`,
+    renderer: prettyJobs.storyboardJob,
+    isTerminal: (d) => STORYBOARD_JOB_TERMINAL.has(d?.status),
+    isSuccess: (d) => d?.status === "done",
+    describe: (d) => `${d?.status}${d?.stage ? `(${d.stage})` : ""}${d?.progress ? ` ${d.progress.done}/${d.progress.total}` : ""}`,
+    resumeCommand: `dj.mjs storyboard-job get ${jobId} --wait`,
+    onFinal: (d) => afterStoryboardJob(ctx, flags, d),
+  });
+}
+
+/** Remake 成片按 24fps 计帧（与服务端 rm-swap 同口径） */
+const REMAKE_FPS = 24;
+
+/** 收集可重复出现的 `--name value`（parseArgv 只保留最后一个，--keyframe 需要多值） */
+function repeatedFlagValues(name) {
+  const argv = process.argv.slice(3);
+  const values = [];
+  for (let i = 0; i < argv.length; i += 1) {
+    if (argv[i] === "--") break;
+    if (argv[i] === `--${name}` && argv[i + 1] !== undefined && !argv[i + 1].startsWith("--")) {
+      values.push(argv[i + 1]);
+      i += 1;
+    }
+  }
+  return values;
+}
+
+/** 帧号：整数 = 第几帧（24fps，0 起）；`3.5s` = 第 3.5 秒 */
+function parseRemakeFrame(raw, spec) {
+  const text = raw.trim();
+  const seconds = /^(\d+(?:\.\d+)?)s$/i.exec(text);
+  if (seconds) return Math.round(Number(seconds[1]) * REMAKE_FPS);
+  if (/^\d+$/.test(text)) return Number(text);
+  return fail(`--keyframe ${spec}：帧位须是整数帧号（24fps，0 起）或秒数如 3.5s，收到：${raw}`);
+}
+
+/** `1@0.3` / `2@0.7,0.4`（序号@水平位置[,垂直位置]），多人用 `+` 连接 */
+function parseRemakePeople(raw, spec) {
+  return raw.split("+").map((part) => {
+    const matched = /^(\d+)@([\d.]+)(?:,([\d.]+))?$/.exec(part.trim());
+    if (!matched) fail(`--keyframe ${spec}：人物写成「序号@x[,y]」，多人用 + 连接（如 1@0.3+2@0.7），收到：${part}`);
+    const person = Number(matched[1]);
+    const x = Number(matched[2]);
+    const y = matched[3] === undefined ? undefined : Number(matched[3]);
+    if (!Number.isInteger(person) || person < 1) fail(`--keyframe ${spec}：人物序号从 1 开始，收到：${matched[1]}`);
+    if (!(x >= 0 && x <= 1) || (y !== undefined && !(y >= 0 && y <= 1))) {
+      fail(`--keyframe ${spec}：位置按画面宽高比例取 0–1（0=最左/最上，1=最右/最下），收到：${part}`);
+    }
+    return { person, x, ...(y !== undefined ? { y } : {}) };
+  });
+}
+
+/**
+ * `--keyframe <assetId>[:<帧位>[:<人物>]]` → 请求体里的一张参考帧。
+ * 只给一张且省略人物时按「第 1 个人、画面正中」处理；两张时必须写明人物（规则：后一张须包含前一张换过的人）。
+ */
+function parseRemakeKeyframe(spec, total) {
+  const [assetId, frameRaw, peopleRaw, ...rest] = spec.split(":");
+  if (rest.length > 0) fail(`--keyframe 只有三段（assetId:帧位:人物），收到：${spec}`);
+  assertAssetIds([assetId], "--keyframe 的参考帧");
+  if (peopleRaw === undefined && total > 1) {
+    fail(`给了 ${total} 张参考帧时每张都要写明人物：--keyframe <assetId>:<帧位>:<序号@x>，收到：${spec}`);
+  }
+  return {
+    assetId,
+    frame: frameRaw === undefined || frameRaw === "" ? 0 : parseRemakeFrame(frameRaw, spec),
+    people: peopleRaw === undefined ? [{ person: 1, x: 0.5 }] : parseRemakePeople(peopleRaw, spec),
+  };
+}
+
+function buildRemakeBody(flags) {
+  const source = typeof flags.source === "string" ? flags.source.trim() : "";
+  if (!source) fail("remake 需要 --source <源视频assetId>（本地视频先 dj.mjs upload）");
+  assertAssetIds([source], "--source");
+  const specs = repeatedFlagValues("keyframe");
+  if (specs.length === 0) fail("remake 需要至少一个 --keyframe <参考帧assetId>[:帧位[:人物]]（最多 2 张）");
+  if ((typeof flags.canvas === "string") !== (typeof flags.node === "string")) fail("--canvas 与 --node 必须成对提供");
+  return {
+    sourceVideoAssetId: source,
+    keyframes: specs.map((spec) => parseRemakeKeyframe(spec, specs.length)),
+    ...(flags["lip-sync"] ? { lipSync: true } : {}),
+    ...(typeof flags.sku === "string" ? { sku: flags.sku } : {}),
+    ...(typeof flags.canvas === "string" ? { canvasId: flags.canvas, nodeId: flags.node } : {}),
+  };
+}
+
+/**
+ * `remake --source <assetId> --keyframe <assetId>[:帧位[:人物]] … [--lip-sync] [--canvas --node] [--dry-run|--yes --request-id <uuid>]`
+ * 换人重演 1–2 人（保留原场景 / 动作 / 运镜 / 原声）。产物是一条普通生成任务：查进度用 `dj task <taskId>`。
+ */
+async function cmdRemake(ctx, { flags }) {
+  let body;
+  if (typeof flags.file === "string") {
+    const input = await readJsonInput(flags, "remake 请求体");
+    if (!input || typeof input !== "object" || Array.isArray(input)) fail("remake 输入形状不对：期待一个请求体对象");
+    // dryRun / requestId 一律由命令行开关决定，文件里的不算（免得文件里残留 dryRun:false 绕过报价）
+    body = Object.fromEntries(Object.entries(input).filter(([key]) => key !== "dryRun" && key !== "requestId"));
+  } else {
+    body = buildRemakeBody(flags);
+  }
+  if (quoteOnly(flags)) {
+    handle(ctx, await request(ctx, "POST", "/remakes", { ...body, dryRun: true }), prettyJobs.remakeQuote);
+    printQuoteNextStep(flags);
+    return;
+  }
+  // 与 generate 同：幂等键必须由调用方生成并存下来，重试原样复用才不会重复扣费
+  const requestId = typeof flags["request-id"] === "string" ? flags["request-id"].trim() : "";
+  if (!/^[0-9a-fA-F-]{36}$/.test(requestId)) {
+    fail("remake 正式提交须带 --request-id <uuid>（幂等键）。用 `dj.mjs uuid` 生成一个并存下来，失败重试时原样复用。");
+  }
+  const quoteId = await autoDryRunQuoteId(ctx, flags, "/remakes", body);
+  const data = handle(ctx, await request(ctx, "POST", "/remakes", withQuoteId({ ...body, requestId }, quoteId)), prettyJobs.remakeSubmitted);
+  if (data?.taskId) process.stderr.write(`dj: 换人任务已提交，查进度 \`dj.mjs task ${data.taskId} --watch\`\n`);
+}
+
+const ADAPT_EPISODE_SECS = new Set([60, 90, 120]);
+const ADAPT_DENSITIES = new Set(["brisk", "standard", "dense", "condensed"]);
+
+function isAdaptTerminal(d) {
+  return d?.status === "done" || d?.status === "canceled" || d?.status === "paused" || d?.pollAfterMs === 0;
+}
+
+/** 改编作业到手后：--out 逐集落盘；paused 指去站内处理 */
+function afterAdaptation(ctx, flags, d) {
+  if (!d) return;
+  if (d.status === "paused" && d.webPath) {
+    process.stderr.write(
+      `dj: 改编已暂停（${d.pausedReason ?? "-"}）：请用户到站内写作台继续或重试——${ctx.base.replace(/\/+$/, "")}${d.webPath}\n`,
+    );
+  }
+  if (typeof flags.out !== "string") return;
+  const episodes = d.script?.episodes ?? [];
+  if (episodes.length === 0) {
+    process.stderr.write("dj: 还没有可写出的集（作业未完成或尚无产物），--out 未写文件\n");
+    return;
+  }
+  mkdirSync(flags.out, { recursive: true });
+  const files = episodes.map((ep) => {
+    const file = pathJoin(flags.out, `ep${String(ep.number).padStart(2, "0")}.txt`);
+    writeFileSync(file, `${ep.text.trim()}\n`, "utf8");
+    return file;
+  });
+  process.stderr.write(
+    `dj: 已写出 ${files.length} 集剧本到 ${flags.out}（ep01.txt…）。逐集拆镜：dj.mjs storyboard-job ${files[0]} --dry-run\n`,
+  );
+}
+
+/**
+ * `adapt <小说文件|-> [--title] [--episode-sec 60|90|120] [--density …] [--genre-guide id] [--dry-run|--yes] [--request-id] [--wait]`
+ * `adapt get <adaptationId> [--wait] [--out dir]`
+ */
+async function cmdAdapt(ctx, { positional, flags }) {
+  if (positional[0] === "get") return cmdAdaptGet(ctx, positional.slice(1), flags);
+  const text = await readTextArg(positional[0], "小说正文", "dj.mjs adapt <小说txt文件>（或 - 从 stdin 读）");
+  let episodeSec;
+  if (flags["episode-sec"] !== undefined) {
+    episodeSec = Number(flags["episode-sec"]);
+    if (!ADAPT_EPISODE_SECS.has(episodeSec)) fail(`--episode-sec 只能是 60 / 90 / 120，收到：${flags["episode-sec"]}`);
+  }
+  const density = typeof flags.density === "string" ? flags.density : undefined;
+  if (density !== undefined && !ADAPT_DENSITIES.has(density)) fail(`--density 只能是 ${[...ADAPT_DENSITIES].join(" / ")}，收到：${density}`);
+  const body = {
+    text,
+    ...(typeof flags.title === "string" ? { title: flags.title } : {}),
+    ...(episodeSec !== undefined ? { episodeSec } : {}),
+    ...(density ? { density } : {}),
+    ...(typeof flags["genre-guide"] === "string" ? { genreGuide: flags["genre-guide"] } : {}),
+  };
+  if (quoteOnly(flags)) {
+    handle(ctx, await request(ctx, "POST", "/adaptations", { ...body, dryRun: true }), prettyJobs.adaptQuote);
+    printQuoteNextStep(flags);
+    return;
+  }
+  const { requestId, generated } = jobRequestId(flags);
+  const quoteId = await autoDryRunQuoteId(ctx, flags, "/adaptations", body);
+  const submitted = await request(ctx, "POST", "/adaptations", withQuoteId({ ...body, requestId }, quoteId));
+  const data = submitted.envelope?.data;
+  if (!flags.wait || submitted.status < 200 || submitted.status >= 300 || !submitted.envelope?.ok || typeof data?.adaptationId !== "string") {
+    handle(ctx, submitted, prettyJobs.adaptation);
+  }
+  process.stderr.write(
+    `dj: 已提交 adaptationId=${data.adaptationId}${generated ? `（幂等键 --request-id ${requestId}：网络中断重试时原样带上，不会重复建稿扣费）` : ""}；` +
+      `查进度 \`dj.mjs adapt get ${data.adaptationId} --wait --out <目录>\`\n`,
+  );
+  if (flags.wait) await waitAdaptation(ctx, flags, data.adaptationId);
+}
+
+async function cmdAdaptGet(ctx, positional, flags) {
+  const id = positional[0];
+  if (typeof id !== "string") fail("adapt get 需要 adaptationId：dj.mjs adapt get <adaptationId> [--wait] [--out 目录]");
+  if (flags.wait) return waitAdaptation(ctx, flags, id);
+  const data = handle(ctx, await request(ctx, "GET", `/adaptations/${encodeURIComponent(id)}`), prettyJobs.adaptation);
+  afterAdaptation(ctx, flags, data);
+}
+
+function waitAdaptation(ctx, flags, id) {
+  return pollJob(ctx, flags, {
+    path: `/adaptations/${encodeURIComponent(id)}`,
+    renderer: prettyJobs.adaptation,
+    isTerminal: isAdaptTerminal,
+    isSuccess: (d) => d?.status === "done",
+    describe: (d) => `${d?.status}${d?.progress ? ` 批 ${d.progress.batchesDone}/${d.progress.batchesTotal}` : ""}`,
+    resumeCommand: `dj.mjs adapt get ${id} --wait`,
+    onFinal: (d) => afterAdaptation(ctx, flags, d),
+  });
+}
+
+// ---------------------------------------------------------------------------
+// 委托画布创作助手（OpenAPI M3：agent-runs）
+// ---------------------------------------------------------------------------
+
+/** run 停下等人的状态：awaiting_approval 等用户逐项确认，其余是终态 */
+const AGENT_RUN_STOP_STATUSES = new Set(["awaiting_approval", "completed", "failed", "cancelled"]);
+const UUID_RE = /^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$/;
+
+/** 一条待批项 → 人读的几行（报价 = 动作本身 + 批准后续跑一轮的模型费上限） */
+function agentActionLines(a) {
+  const price =
+    a.credits === null || a.credits === undefined
+      ? "报价暂缺（不能批准，稍后再查）"
+      : `${a.credits} 积分${typeof a.turnCredits === "number" ? ` + 续跑一轮 ≤${a.turnCredits} 积分` : ""}`;
+  return [
+    `  · ${a.actionId}　[${a.type}]${a.decided ? `　已${a.decided === "approve" ? "批准" : "拒绝"}（等同批其他项答完）` : ""}`,
+    `    ${a.title ? `${a.title}：` : ""}${a.description}`,
+    `    报价 ${price}`,
+    a.quoteId ? `    quoteId ${a.quoteId}　过期 ${a.quoteExpiresAt ?? "-"}` : "",
+    a.approvable === false ? `    ⛔ 不能批准：${a.blockedReason ?? "-"}` : "",
+    ...(a.items ?? []).map((item) => `      - ${item.label}${item.costly ? "（花钱）" : ""}`),
+  ].filter(Boolean);
+}
+
+function renderAgentRun(d) {
+  const spent = d.spentCredits
+    ? `${d.spentCredits.total} 积分（生成 ${d.spentCredits.generation}｜对话 ${d.spentCredits.conversation}）`
+    : "-";
+  return [
+    `run    ${d.runId}　画布 ${d.canvasId}　Agent ${d.agentId}`,
+    `状态   ${d.status}${d.finishing ? "（已取消，在跑的一轮跑完即止）" : ""}　${d.autoGenerate ? "允许生成（逐项批准）" : "只出计划"}　已起 ${d.turns} 轮`,
+    `已花   ${spent}`,
+    d.steerQueued ? `插话   排队 ${d.steerQueued} 条（本轮结束后注入）` : "",
+    d.lastError ? `错误   ${d.lastError}` : "",
+    (d.recentSteps ?? []).length ? `步骤   ${d.recentSteps.map((s) => `${s.tool}:${s.state}`).join("　")}` : "",
+    d.reply ? `回复\n${d.reply}` : "",
+    (d.pendingActions ?? []).length ? `待批项（${d.pendingActions.length}）` : "",
+    ...(d.pendingActions ?? []).flatMap(agentActionLines),
+    d.statusUrl ? `查询   ${d.statusUrl}` : "",
+  ]
+    .filter(Boolean)
+    .join("\n");
+}
+
+function renderAgentRunQuote(d) {
+  return [
+    `报价  一轮模型费用上限 ${d.credits} 积分（按实际用量计，不超过它）`,
+    `余额  ${d.balance}`,
+    d.quoteId ? `凭证  ${d.quoteId}（15 分钟有效，可用 --quote-id 带上）` : "",
+  ]
+    .filter(Boolean)
+    .join("\n");
+}
+
+/** run 停下后的下一步提示（stderr）：待批项要用户本人逐项确认，dj 绝不替用户批准 */
+function afterAgentRun(ctx, d) {
+  if (!d) return;
+  if (d.status === "awaiting_approval") {
+    const pending = d.pendingActions ?? [];
+    if (!ctx.pretty && pending.length) {
+      process.stderr.write(`dj: 待批项（${pending.length}）：\n${pending.flatMap(agentActionLines).join("\n")}\n`);
+    }
+    process.stderr.write(
+      "dj: run 在等用户确认。把每一项的描述与报价原样告诉用户，**用户本人逐项确认后**才批准：\n" +
+        `    批准 dj.mjs agent-run approve ${d.runId} <actionId> --quote-id <该项的 quoteId>\n` +
+        `    拒绝 dj.mjs agent-run reject ${d.runId} <actionId> [--note "原因"]\n` +
+        "    同一批待批项全部答完才会继续；quoteId 过期就重新 get 拿新的。想改方向用 steer（会作废未处理的待批项）。\n",
+    );
+    if (pending.some((a) => a.type === "spend") && !d.autoGenerate) {
+      process.stderr.write(
+        "dj: 这是只出计划的 run——花钱项批不了；用户同意花钱后先 `dj.mjs agent-run steer <runId> --auto-generate \"…\" --yes` 升级，或 reject。\n",
+      );
+    }
+    return;
+  }
+  if (d.status === "cancelled" && d.finishing) {
+    process.stderr.write("dj: 已取消；在跑的那一轮会跑完即止，之后不再起轮。已批准提交的生成照常完成、按实结算。\n");
+  }
+}
+
+function waitAgentRun(ctx, flags, runId) {
+  return pollJob(ctx, flags, {
+    path: `/agent-runs/${encodeURIComponent(runId)}`,
+    renderer: renderAgentRun,
+    isTerminal: (d) => AGENT_RUN_STOP_STATUSES.has(d?.status),
+    // 停在待批不算失败（退出码 0）；failed / cancelled 退出码 7
+    isSuccess: (d) => d?.status === "completed" || d?.status === "awaiting_approval",
+    describe: (d) => {
+      const last = d?.recentSteps?.at(-1);
+      return `${d?.status}${last ? ` ${last.tool}:${last.state}` : ""}`;
+    },
+    resumeCommand: `dj.mjs agent-run get ${runId} --wait`,
+    onFinal: (d) => afterAgentRun(ctx, d),
+  });
+}
+
+/** 位置参数拼成一段文本；为空或 `-` 时读 stdin */
+async function agentRunText(parts, what, usage) {
+  const joined = parts.join(" ").trim();
+  if (joined && joined !== "-") return joined;
+  return readTextArg(joined === "-" ? "-" : undefined, what, usage);
+}
+
+function requireRunId(positional, usage) {
+  const runId = positional[0];
+  if (typeof runId !== "string" || !UUID_RE.test(runId)) fail(`需要 runId（uuid）：${usage}`);
+  return runId;
+}
+
+/** `agent-run start <canvasId> "<目标>" [--auto-generate] [--dry-run | --yes] [--request-id <uuid>] [--quote-id] [--wait]` */
+async function agentRunStart(ctx, positional, flags) {
+  const usage = 'dj.mjs agent-run start <canvasId> "<要创作助手做的事>" [--auto-generate] [--yes]';
+  const canvasId = positional[0];
+  if (typeof canvasId !== "string" || !UUID_RE.test(canvasId)) fail(`需要 canvasId（uuid）：${usage}`);
+  const instruction = await agentRunText(positional.slice(1), "目标描述", usage);
+  const { requestId, generated } = jobRequestId(flags);
+  if (!UUID_RE.test(requestId)) fail(`--request-id 必须是 uuid（用 dj.mjs uuid 生成），收到：${requestId}`);
+  const body = {
+    canvasId,
+    instruction,
+    ...(typeof flags.agent === "string" ? { agentId: flags.agent } : {}),
+    ...(flags["auto-generate"] ? { autoGenerate: true } : {}),
+    requestId,
+  };
+  if (quoteOnly(flags)) {
+    handle(ctx, await request(ctx, "POST", "/agent-runs", { ...body, dryRun: true }), renderAgentRunQuote);
+    printQuoteNextStep(flags);
+    return;
+  }
+  // 凭证指纹不含 requestId，报价与提交带同一个即可
+  const quoteId = await autoDryRunQuoteId(ctx, flags, "/agent-runs", body);
+  const submitted = await request(ctx, "POST", "/agent-runs", withQuoteId(body, quoteId));
+  const data = submitted.envelope?.data;
+  const okResponse = submitted.status >= 200 && submitted.status < 300 && submitted.envelope?.ok && typeof data?.runId === "string";
+  if (!okResponse) handle(ctx, submitted, renderAgentRun);
+  process.stderr.write(
+    `dj: 已委托 runId=${data.runId}${generated ? `（幂等键 --request-id ${requestId}：网络中断重试时原样带上，不会重复起轮）` : ""}；` +
+      `查进度 \`dj.mjs agent-run get ${data.runId} --wait\`\n`,
+  );
+  if (flags.wait) return waitAgentRun(ctx, flags, data.runId);
+  emit(ctx, submitted.envelope, renderAgentRun);
+  afterAgentRun(ctx, data);
+}
+
+/** `agent-run approve|reject <runId> <actionId> [--quote-id <id>] [--note "…"]` */
+async function agentRunDecide(ctx, decision, positional, flags) {
+  const usage =
+    decision === "approve"
+      ? 'dj.mjs agent-run approve <runId> <actionId> --quote-id <quoteId> [--note "…"]'
+      : 'dj.mjs agent-run reject <runId> <actionId> [--note "原因"]';
+  const runId = requireRunId(positional, usage);
+  const actionId = positional[1];
+  if (typeof actionId !== "string" || !actionId) fail(`需要 actionId（agent-run get 列出的待批项）：${usage}`);
+  const quoteId = typeof flags["quote-id"] === "string" ? flags["quote-id"].trim() : "";
+  // 批准必须显式带用户看过价格的那张凭证：dj 不替用户去取凭证批准
+  if (decision === "approve" && !quoteId) {
+    fail(
+      `批准必须显式带 --quote-id：先 \`dj.mjs agent-run get ${runId}\` 把这一项的描述与报价告诉用户，` +
+        "用户本人确认后，再把该项的 quoteId 原样带上。",
+    );
+  }
+  const note = typeof flags.note === "string" ? flags.note.trim() : "";
+  const body = { decision, ...(decision === "approve" ? { quoteId } : {}), ...(note ? { note } : {}) };
+  const path = `/agent-runs/${encodeURIComponent(runId)}/actions/${encodeURIComponent(actionId)}`;
+  const data = handle(ctx, await request(ctx, "POST", path, body), renderAgentRun);
+  afterAgentRun(ctx, data);
+  if (data && data.status !== "awaiting_approval") {
+    process.stderr.write(`dj: 本批待批项已答全，助手继续执行；查进度 \`dj.mjs agent-run get ${runId} --wait\`\n`);
+  }
+}
+
+/** `agent-run steer <runId> "<补充要求>" [--auto-generate] [--dry-run | --yes] [--request-id <幂等键>] [--quote-id] [--wait]` */
+async function agentRunSteer(ctx, positional, flags) {
+  const usage = 'dj.mjs agent-run steer <runId> "<补充要求>" [--auto-generate] [--request-id <幂等键>] [--yes]';
+  const runId = requireRunId(positional, usage);
+  const message = await agentRunText(positional.slice(1), "插话内容", usage);
+  // 幂等键：缺省现取一个；网络中断重试时原样带上，服务端不会重复入队（≤128 字）
+  const { requestId, generated } = jobRequestId(flags);
+  if (requestId.length > 128) fail(`--request-id 不能超过 128 字：${usage}`);
+  const body = { message, ...(flags["auto-generate"] ? { autoGenerate: true } : {}), requestId };
+  const path = `/agent-runs/${encodeURIComponent(runId)}/steer`;
+  if (quoteOnly(flags)) {
+    handle(ctx, await request(ctx, "POST", path, { ...body, dryRun: true }), renderAgentRunQuote);
+    printQuoteNextStep(flags);
+    return;
+  }
+  // 凭证指纹不含 requestId，报价与提交带同一个即可
+  const quoteId = await autoDryRunQuoteId(ctx, flags, path, body);
+  const submitted = await request(ctx, "POST", path, withQuoteId(body, quoteId));
+  const data = handle(ctx, submitted, renderAgentRun);
+  if (submitted.envelope?.meta?.replayed) process.stderr.write("dj: 同一 --request-id 的插话之前已受理，没有重复入队。\n");
+  else if (generated) process.stderr.write(`dj: 插话幂等键 --request-id ${requestId}（网络中断重试时原样带上，不会重复注入）\n`);
+  if (data?.steerQueued) process.stderr.write("dj: 助手正在跑，插话已排队，本轮结束后注入。\n");
+  if (flags.wait && data) return waitAgentRun(ctx, flags, runId);
+  afterAgentRun(ctx, data);
+}
+
+/**
+ * 委托画布创作助手：`start` / `get` / `approve` / `reject` / `steer` / `cancel`。
+ * 复杂多步任务交给助手在画布上做；花钱的每一步都停在 awaiting_approval，等用户本人逐项确认。
+ */
+async function cmdAgentRun(ctx, { positional, flags }) {
+  const sub = positional[0];
+  const rest = positional.slice(1);
+  if (sub === "start") return agentRunStart(ctx, rest, flags);
+  if (sub === "approve" || sub === "reject") return agentRunDecide(ctx, sub, rest, flags);
+  if (sub === "steer") return agentRunSteer(ctx, rest, flags);
+  if (sub === "get") {
+    const runId = requireRunId(rest, "dj.mjs agent-run get <runId> [--wait]");
+    if (flags.wait) return waitAgentRun(ctx, flags, runId);
+    const data = handle(ctx, await request(ctx, "GET", `/agent-runs/${encodeURIComponent(runId)}`), renderAgentRun);
+    afterAgentRun(ctx, data);
+    return;
+  }
+  if (sub === "cancel") {
+    const runId = requireRunId(rest, "dj.mjs agent-run cancel <runId>");
+    const data = handle(ctx, await request(ctx, "POST", `/agent-runs/${encodeURIComponent(runId)}/cancel`, {}), renderAgentRun);
+    afterAgentRun(ctx, data);
+    return;
+  }
+  fail(`未知子命令 agent-run ${sub ?? ""}（可用：start / get / approve / reject / steer / cancel）`);
+}
+
 const COMMANDS = {
   login: cmdLogin,
   logout: cmdLogout,
@@ -5380,6 +6284,8 @@ const COMMANDS = {
   voices: cmdVoices,
   "digital-humans": cmdDigitalHumans,
   "character-voices": cmdCharacterVoices,
+  trim: cmdTrim,
+  "voice-harvest": cmdVoiceHarvest,
   projects: cmdProjects,
   canvas: cmdCanvas,
   node: cmdNode,
@@ -5387,11 +6293,15 @@ const COMMANDS = {
   ops: cmdOps,
   extract: cmdExtract,
   storyboard: cmdStoryboard,
+  "storyboard-job": cmdStoryboardJob,
   "storyboard-fall": cmdStoryboardFall,
+  remake: cmdRemake,
+  adapt: cmdAdapt,
   caption: cmdCaption,
   inspect: cmdInspect,
   rewrite: cmdRewrite,
   agents: cmdAgents,
+  "agent-run": cmdAgentRun,
   chat: cmdChat,
   chats: cmdChats,
   "edit-session": cmdEditSession,

@@ -1,6 +1,6 @@
 ---
 name: rooyun-cli
-version: 1.60.1
+version: 1.62.1
 releasedAt: 2026-11-19
 description: RooYun 精简版（CLI 自由模式）：只告诉你终端里的 dj.mjs 能调哪些能力、各产出什么——文生图、图生图/编辑、图生视频、首尾帧、参考图生视频、数字人口播、配音、音乐、音效、视频高清、视频转白模、上传素材、下载产物，以及可选的画布读写和平台 LLM 辅助（提示词优化、参考图/参考片反推提示词、剧本拆解）。不预设创作流程：提示词怎么写、先做什么后做什么、用哪个模型、要不要画布，全由用户决定。当用户说「用 RooYun 生成一张图 / 一段视频」「我自己写提示词」「别走固定流程」「直接调 RooYun 的工具」「rooyun-cli」，或提到 RooYun、ROOYUN_API_TOKEN 且想自己掌控创作时使用。生成会花用户的真钱，任何生成前先报价并等用户确认。
 ---
@@ -116,11 +116,12 @@ node "$SKILL/scripts/download.mjs" --asset <assetId> --out ./out --pretty
 |---|---|---|
 | 口语描述 → 电影级生图提示词 | `dj rewrite optimize --text "…"` | 扣积分（按轮） |
 | 按要求改写 / 中译英 / 写歌词 | `dj rewrite edit --text "…" --instruction "…"` · `translate` · `lyrics` | 扣积分 |
-| 参考图 → 画面描述（反推提示词） | `dj caption image <assetId>` | 扣积分（0.1/次） |
-| 参考片 → 镜头脚本（自己抽 2–8 帧逐张 upload） | `dj caption video --frames a,b,c --duration 8` | 扣积分（0.1/秒，按时长取整） |
+| 参考图 → 画面描述（反推提示词） | `dj caption image <assetId>` | 扣积分（按次；单价以报价 / 回执 `meta.credits` 为准） |
+| 参考片 → 镜头脚本（自己抽 2–8 帧逐张 upload） | `dj caption video --frames a,b,c --duration 8` | 扣积分（按秒、时长向上取整；单价以报价 / 回执 `meta.credits` 为准） |
 | 剧本 → 角色/场景/道具结构 | `dj extract characters --script ep1.txt` | 扣积分 |
-| 剧本 → 分镜（每段带视频提示词） | `dj storyboard --script ep1.txt` | 扣积分 |
-| 判断一张图有没有崩、像不像 | `dj inspect <assetId> --prompt "…"` | 免费 |
+| 小说 → 分集剧本 | `dj adapt novel.txt`（异步；`dj adapt get <id> --wait --out ./eps` 逐集落盘） | 扣积分（不带 `--yes` 只报价） |
+| 剧本 → 导演式拆镜（设定 + 场→片段→镜，每段带视频提示词） | `dj storyboard-job ep1.txt`（异步；`dj storyboard-job get <id> --wait`） | 扣积分（不带 `--yes` 只报价）；旧 `dj storyboard` 已弃用 |
+| 判断一张图有没有崩、像不像 | `dj inspect <assetId> --prompt "…"` | 扣积分（按次，失败退回；实扣看 `meta.credits`） |
 
 扣积分的辅助命令也是花钱：先告诉用户「这一步要扣积分」再跑。你自己直接写提示词不花钱，
 很多时候比调辅助命令更直接——由用户选。
@@ -130,6 +131,7 @@ node "$SKILL/scripts/download.mjs" --asset <assetId> --out ./out --pretty
 - **账务**：`dj wallet`（余额）· `dj ledger --token-id self`（本令牌花了多少）
 - **任务**：`dj tasks`（在途）· `dj cancel <taskId>`（只有排队中的能真停）
 - **抖音素材**：`dj video-url <单条视频分享链接>` → 视频直链，`curl -L` 下到本地看片（不花钱）
+- **换人重演**：`dj remake --source <视频assetId> --keyframe <参考帧assetId>[:帧位[:序号@x]]`（1–2 人，保留场景 / 动作 / 原声；参考帧要先用 t2i + 源帧 + 角色图画好；不带 `--yes` 只报价，正式提交带 `--request-id`；查进度 `dj task <taskId>`）
 - **爆款复刻 → 剪映草稿**：`dj video-analyze <链接> --quote`（报价，确认后去掉 `--quote` 提交）→ `dj recreate <canvasId> --analysis <id>`（免费落卡、不生成）→ 出片 → `node "$SKILL/scripts/download.mjs" --jianying <canvasId> --group <groupId>`（导出剪映草稿）
 - **多轮 Agent 会话**、**选题情报**（简报 / 雷达 / 文案库）、**参考视频拆解**：见 `dj --help` 对应段落
 
@@ -168,8 +170,8 @@ node "$SKILL/scripts/download.mjs" --asset <assetId> --out ./out --pretty
   图片 `image.qualities` 只有一项就别传 `quality`；时长看 `video.durationSec`。
 - **参考素材上限**：一律以目录为准、各模型不同，别硬编张数——图片看 `image.maxReferenceImages`，
   视频看 `video.referenceImages` / `referenceVideos` / `referenceAudios` 与三类合计 `referenceTotal`、
-  参考音视频时长 `referenceMediaMaxSec`（例：Seedance 2.0 系 9/3/3/合计 12、≤15 秒；Seedance 2.5
-  30/10/10/合计 50、≤30 秒）。**超出即被拒（400/422）、不建任务不扣费，不会静默截断**——先删减或换模型。
+  参考音视频时长 `referenceMediaMaxSec`——具体数字以 `dj models --capability <cap>` 当下的目录为准，
+  别沿用记忆里的数。**超出即被拒（400/422）、不建任务不扣费，不会静默截断**——先删减或换模型。
 - **动图 / 矢量图**：只有 `image.outputFormats` 含 `gif` / `svg` 的模型能出，传
   `params.outputFormat`（其余模型 400）。GIF / SVG **不能**作视频的首尾帧或参考图（422）。
 - 同一模型有多条供给渠道时，渠道故障平台会自动换渠道重提：`taskId` 不变、只是多等一会儿、不另扣费。

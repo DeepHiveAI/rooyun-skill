@@ -1,7 +1,44 @@
-# 角色音色一致性（试镜定嗓）
+# 角色音色一致性（首镜定嗓 · 试镜兜底）
 
 > RooYun Skill 参考文档（从 SKILL.md 拆出）· 主文件：[SKILL.md](../SKILL.md)
 > **何时读**：**对白剧集必读**；要让同一角色全剧一把嗓子时
+
+## 首镜定嗓（默认先走这条，未达标的角色再试镜）
+
+**思路**：不再要求每个角色先出一条试镜片。挑一段对白最适合的正片**先生成**，从成片里给每个开口的角色
+自动切一段单人音色样本，用户试听确认后绑定；没过质量闸的角色、旁白、首段没开口的角色，再走下面的试镜定嗓。
+样本同样来自模型自己出的片（同域），遵从度与试镜一致；省掉每个角色一条试镜片的钱和一步操作。
+
+```sh
+# ① 挑首段：选「主要角色单人台词最长、同框开口的人最少」的那段分镜视频卡（别按时间顺序取第一段）。
+#    角色绑定里已有 voiceDescription 时，把「角色【音色】描述」写进这一段的提示词（与试镜同一种写法），
+#    压低首段嗓子的随机性。照常 lint → 报价 → 等确认 → 出片。
+# ② 对成片抽干声轨（v2a，按产出秒计价，单独报价）：dryVoice 必须开——干声分离没成功的样本质量闸一律不收
+dj uuid   # → $REQ
+dj generate --request-id $REQ --model <v2a模型id> --capability v2a \
+   --params-json "{\"video\":\"$SHOT_VIDEO\",\"dryVoice\":true}"
+dj task <taskId> --watch        # → 记下这条任务的 taskId = $EXTRACTION
+#    卡片重新出片后，旧的抽音轨作废：正式调用会被拒（400 invalid_request），须对当前视频重抽一次；
+#    --dry-run 回执 sourceMatched=false（附 sourceHint）就是这种情况，别直接切样本
+# ③ 切样本（免费；首次会对干声补跑一次句级转写，几十秒；同步返回）
+dj voice-harvest $CANVAS --node $SHOT_NODE --extraction $EXTRACTION --dry-run   # 先看卡上读到的「谁说哪句」
+dj voice-harvest $CANVAS --node $SHOT_NODE --extraction $EXTRACTION --pretty
+#    MCP：harvest_character_voices；REST：POST /v1/canvases/{canvasId}/voice-harvest
+# ④ **让用户试听**每个 pass=true 的 sampleAssetId，确认后再绑定（服务端绝不自动绑定）
+dj character-voices $CANVAS --bind "林小满" --sample <sampleAssetId> --label "首镜样本"
+# ⑤ pass=false（next:"audition"）的角色：把 reasons 转告用户，改走下面的试镜定嗓
+```
+
+**服务端怎么切**：读卡上「谁说哪句」（导演式规范文本逐镜的「说话人（说法）：“原文”」优先，其次卡上台词字段）→
+与干声的句级时间戳逐句对齐（去标点后字符级相似度）→ 只取**该时间窗只属于一个角色**的句子 →
+同角色相邻句（间隔 ≤1.5 秒）合并 → 目标 ≥5 秒、下限 2 秒、上限 15 秒（超长按句截短）→ 质量闸：
+相似度 ≥0.7、时长在区间内、`dryVoiceApplied` 为 true、窗口内没有别人说话。逐角色给 pass 与中文原因。
+
+**什么时候直接走试镜**：没有对白的段落、旁白 / 画外解说、两人台词总是抢话重叠（Demucs 分不开）、
+首段里没开口的角色。首段的嗓子不满意时**只重做那个角色的试镜**，不必重出整段正片。
+
+**手动裁剪**：想自己指定区间时用 `dj trim <assetId> --start <秒> --end <秒>`（MCP：`trim_asset`；
+REST：`POST /v1/assets/{assetId}/trim`，免费），产物同样能直接 `--bind --sample`。
 
 ## 角色音色一致性：试镜定嗓（对白剧集必读）
 
@@ -11,7 +48,7 @@
 
 **解法（试镜定嗓）**：先让角色「试镜」一条单人片段 → 抽出人声轨当**语音样本** →
 绑到角色名上 → 此后该角色每一条对白镜头都把样本作为参考音频注入。原理是**同域样本**：
-模型自己产出的音频反喂自己，音色遵从度最好——所以样本一律来自试镜片，
+模型自己产出的音频反喂自己，音色遵从度最好——所以样本一律来自模型自己出的片（首镜成片或试镜片），
 **不要**拿 TTS 配音、外部录音当样本（不同音色空间，遵从度差一截）。
 
 ### 五步全流程（每一步都可自动化，照抄即可）
@@ -84,7 +121,7 @@ dj generate --request-id <新uuid> --model <ref2v模型id> --capability ref2v \
 | 约束 | 数值 | 违反后果 |
 |---|---|---|
 | 参考音频只有 `ref2v` 吃 | — | 挂别的能力词直接 400（别的链路不透传，放行=假锁嗓） |
-| 每段时长 | **2 秒起，上限看目录 `video.referenceMediaMaxSec`**（如 Seedance 2.0 系 15 秒、2.5 为 30 秒；合计也不超它） | 服务端按资产真实时长核对，超界 400。定嗓绑定的样本仍须 2–15 秒（④ 步） |
+| 每段时长 | **2 秒起，上限看目录 `video.referenceMediaMaxSec`**（各模型不同，以 `dj models` 当前目录为准；合计也不超它） | 服务端按资产真实时长核对，超界 400。定嗓绑定的样本仍须 2–15 秒（④ 步） |
 | 段数上限 | 看目录 `video.referenceAudios`，且与参考图、参考视频合计不超 `video.referenceTotal` | 超出即拒、不扣费，不会静默丢段；自动注入只注入放得下的段数，其余记进 `meta.voiceSamples.skipped` |
 | 搭配参考图 / 参考视频 | 至少 1 张图或 1 段视频，除非模型 `video.referenceAudioOnly: true` | 定嗓场景本来就带角色参考图，照常给 |
 | 容器 | 仅 wav / mp3 | 其余测不出时长，入口拒绝 |
@@ -105,7 +142,7 @@ dj generate --request-id <新uuid> --model <ref2v模型id> --capability ref2v \
 
 ### 这条流水线花多少钱
 
-试镜片 = 一条普通 ref2v 视频的价；抽音轨按**产出秒**计价（约 0.002 积分/秒量级，
-6 秒样本≈0.01 积分，几乎免费）；绑定读写不扣钱。真正的成本是试镜抽卡——
+试镜片 = 一条普通 ref2v 视频的价；抽音轨按**产出秒**计价（单价远低于出片，
+以 `precheck` 报价为准）；绑定读写不扣钱。真正的成本是试镜抽卡——
 音色描述写得越具体，一次过的概率越高。
 
