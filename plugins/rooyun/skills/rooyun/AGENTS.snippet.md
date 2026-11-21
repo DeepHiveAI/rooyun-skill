@@ -1,5 +1,5 @@
 <!--
-  rooyun-skill-version: 1.62.1
+  rooyun-skill-version: 1.64.0
 
   把下面 `## RooYun 开放 API` 整段粘进你项目的 AGENTS.md（Codex）或等价的长期指令文件，
   并把 rooyun-skill/scripts/ 放到 Agent 能执行到的位置（零依赖，Node ≥ 18）。
@@ -342,7 +342,7 @@ dj creator-archive <secUid> <videoId>            # 转存原片 → assetId（�
   非管理员列表恒为空、带 id 提交被拒。
 - **素材一律用 assetId**（64 位小写 hex，来自 `canvas structure` 的 `assetIds`）；
   不收 URL、不收 base64、不收本地路径。本地文件先 `dj upload <path>` 换 assetId
-  （需 `assets:write`；≤50MB，1 GiB/天；幂等——assetId 就是内容 sha256，重传只会
+  （需 `assets:write`；≤200MB，1 GiB/天；幂等——assetId 就是内容 sha256，重传只会
   返回 `deduplicated: true`）。
 - **配音先挑嗓子**：`dj voices --q 温暖少女`。`kind:"system"` 填 `params.voiceId`，
   `kind:"user"` 填 `params.voiceName`，两者不通用；id **原样回传别 trim**

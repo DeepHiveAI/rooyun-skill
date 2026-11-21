@@ -51,7 +51,7 @@ const DEFAULT_BASE = "https://www.rooyun.com";
  *
  * 它不是第二个真相源：生成脚本从 SKILL.md 派生写入，两处不一致时构建就红。
  */
-const EMBEDDED_SKILL_VERSION = "1.62.1";
+const EMBEDDED_SKILL_VERSION = "1.64.0";
 
 /**
  * 单次 HTTP 请求的**空闲**超时（毫秒）：两次收到字节之间允许的最大间隔，
@@ -781,7 +781,7 @@ function hintFor(status, code, meta, error) {
     case "length_required":
       return "上传必须带 Content-Length。用 dj.mjs upload 或标准 HTTP 客户端的文件上传，别用 chunked 传输。";
     case "payload_too_large":
-      return "文件超过 50MB 上限，服务端不会截断受理半个文件——请压缩或分段后重传。";
+      return "文件超过 200MB 上限，服务端不会截断受理半个文件——请压缩或分段后重传。";
     case "unsupported_media_type":
       return "不是 multipart，或文件类型不在白名单，或声明类型与文件内容不符（按魔数判定）。换一个受支持的文件重传（SVG 一律不受理）。";
     case "upload_quota_exceeded":
@@ -857,6 +857,27 @@ function hintFor(status, code, meta, error) {
       return meta?.kind === "daily_runs"
         ? "这枚令牌今天新建的委托 run 已到上限（本次未执行、未扣费）→ 别再开新 run：在已有的 run 上 `dj.mjs agent-run steer <runId> \"…\" --yes` 继续，或明天（北京时间）再开。别换令牌绕过。"
         : "这枚令牌同时在跑的委托 run 已到上限（本次未执行、未扣费）→ 先 `dj.mjs agent-run get <runId> --wait` 等其中一个这一轮跑完再起。别换令牌绕过。";
+    case "template_runs_disabled":
+      return "按模板出片的开放 API 还没对这个账号开放（灰度；本次未执行、未扣费）。令牌与 scope 都没问题、重建令牌也没用 → 如实告诉用户暂未开放；已有作业照样能查、能取消。";
+    case "template_version_superseded":
+      return (
+        `模板已发布新版本${meta?.currentVersion ? `（当前 v${meta.currentVersion}）` : ""}（本次未执行、未扣费）→ ` +
+        "先 `dj.mjs templates get <templateId>` 看新版本的输入有没有变，按当前版本重新 `dj.mjs template-run precheck` 报价、让用户确认后再提交。"
+      );
+    case "template_input_invalid":
+      return "模板输入不合法（本次未执行、未扣费）→ 按 meta.issues 逐条改：素材要用 `dj.mjs upload` 得到的 assetId 且类型与输入的 type 一致，选项值从 `dj.mjs templates get` 的 option.choices 里选，数字用 `--input key:=10`。改好后重新报价。";
+    case "template_not_runnable":
+      return "这个模板当前没法在服务端执行（meta.reason 是原因码；本次未执行、未扣费）。不是你的参数问题，原样重试没用 → 换一个模板，或把 meta.reason 告诉平台方。";
+    case "template_run_limit_exceeded":
+      return meta?.kind === "token_daily"
+        ? "这枚令牌今天新建的模板作业已到上限（本次未执行、未扣费）→ 明天（北京时间）再来。别换令牌绕过。"
+        : "同时在跑的模板作业已到上限（本次未执行、未扣费）→ `dj.mjs template-run list` 看进度，等其中一个结束再提交。别换令牌绕过。";
+    case "template_run_state":
+      return "作业当前状态不受理这个动作（未执行、未扣费）→ 先 `dj.mjs template-run get <runId>` 看 status：取消只对 queued / running 有效，转正画布与重投 Webhook 要等作业结束。";
+    case "webhook_secret_missing":
+      return "这枚令牌还没有 Webhook 签名密钥（本次未执行、未扣费）→ 先 `dj.mjs webhook-secret --yes` 生成并让用户存好（明文只显示一次），再带 --webhook-url 提交；不需要回调就去掉 --webhook-url、改用 --wait 轮询。";
+    case "request_id_conflict":
+      return "这个 --request-id 已用于另一组参数（本次未执行、未扣费）→ 同一次提交的网络重试必须参数原样；要发一次新的提交，用 `dj.mjs uuid` 换一个新的 requestId。";
     case "turn_incomplete":
       return "这一轮跑完了却没能落库成消息（服务端两次落库都失败）。用**同一个 requestId** 重发一次即可（幂等，不会重复扣费）；仍失败就 `dj.mjs chat history <conversationId>` 看这段会话停在哪一 seq，再决定要不要重跑。";
     default:
@@ -2787,8 +2808,8 @@ async function cmdRewrite(ctx, { positional, flags }) {
   handle(ctx, await request(ctx, "POST", "/analyze/rewrite", withQuoteId(body, quoteId)), pretty.rewrite);
 }
 
-/** 直传 PUT 的超时：50MB 在慢网下也够；超时即回落 multipart，不卡死 */
-const DIRECT_PUT_TIMEOUT_MS = 10 * 60_000;
+/** 直传 PUT 的超时：200MB 在慢网下也够（与服务端签名有效期 30 分钟对齐）；超时即回落 multipart，不卡死 */
+const DIRECT_PUT_TIMEOUT_MS = 30 * 60_000;
 /** complete 遇 503 的重试次数（暂存文件仍在，重试无需重传） */
 const COMPLETE_RETRIES = 2;
 
@@ -4178,7 +4199,7 @@ const HELP = `dj.mjs · RooYun 开放 API v1 客户端（零依赖，Node ≥ 18
   node <canvasId> <nodeId>              详读单卡：正文全文、可写参数快照、上下游
                                         （精确改卡前先读它——structure 的摘要截断在 600 字）
 
-  upload <path>                         上传本地素材换 assetId（≤50MB，需 assets:write）
+  upload <path>                         上传本地素材换 assetId（≤200MB，需 assets:write）
                                         幂等：同一份字节重传只有一个 id，deduplicated=true
 
   ops <canvasId> [-f batch.json] [--if-version N]
@@ -4324,6 +4345,43 @@ const HELP = `dj.mjs · RooYun 开放 API v1 客户端（零依赖，Node ≥ 18
                                         **作废**未处理的待批项；在跑时排队到本轮结束。--auto-generate 只升不降。
                                         幂等键缺省现取一个，重试原样带上不会重复注入；插话报错 = 这句没注入
   agent-run cancel <runId>              软取消：在跑的一轮跑完即止，之后不再起轮；已批准提交的生成照常结算
+
+  —— 用模板出片（看模板需 templates:read；报价 / 建作业 / 取消 / 转正需 generate；查作业需 tasks:read；
+     **建作业扣积分**，默认只报价）——
+  templates list [--mine] [--featured] [--category <c>] [--tag <t>] [--page N] [--page-size N]
+                                        --mine：自己在画布上发布的工作流（私有也在，只有自己能调用，执行当前版本）
+                                        已发布的画布模板（免费）
+  templates get <templateId>            模板详情：当前版本、inputs（key / 类型 / 必填 / 可选值 / 示例）、outputs、预估
+  template-run precheck <templateId> [--version N] [--input key=value …] [--inputs-json '{…}'] [-f body.json]
+                                        报价（不扣费，回 credits 与 quoteId）。输入写法：
+                                          --input key=文字或assetId    --input key:=10（数字 / JSON 值）
+                                          --input key=@文件.txt（读文本文件）；本地素材先 dj.mjs upload 拿 assetId
+  template-run create <templateId> [同上输入] [--version N] [--keep-canvas] [--webhook-url <https://…>]
+                      [--dry-run | --yes --request-id <uuid> --quote-id <id>] [--wait] [--timeout <秒>]
+                                        按模板建作业。不带 --yes 只报价；正式提交必须带 --request-id
+                                        （dj.mjs uuid 现取并存下来，重试原样复用，换新键 = 重复扣费）
+                                        和用户确认过的那次报价的 --quote-id（dj 不替你重新报价再提交）。
+                                        --keep-canvas：成功后把隐藏画布转正（项目列表可见）。
+                                        --webhook-url：终态回调，先 dj.mjs webhook-secret --yes 生成签名密钥
+                                        --compose on|off：多段（全是视频）是否合成一条，缺省按模板；
+                                        --segment-order k1,k2,…：本次的分段顺序（输出 key 的完整排列，只作用于本次）
+  template-run get <runId> [--wait] [--timeout <秒>]
+                                        查作业（免费）：每步进度、输出 assetId、花费。--wait 轮询到
+                                        succeeded / failed / canceled；成功后用 download.mjs --asset <id> 取件
+  template-run list [--limit N] [--template <templateId>]
+                                        本账号最近的模板作业（≤20，丢了 runId 时用）；--template 只列这个模板的
+  template-run cancel <runId>           取消：没提交的步骤不再提交，已提交的生成照常跑完结算
+  template-run retry <runId> [--yes --request-id <新 uuid> --quote-id <id>] [--wait]
+                                        失败 / 取消的作业在同一副本上继续（最多 3 次）：不带 --yes 只报价（只算剩下的）；
+                                        已完成的段不重新提交、不重复扣费。正式继续要新的 --request-id 与那次报价的 --quote-id；
+                                        只能用建作业的那枚令牌继续
+  template-run compose <runId>          多段视频全部成功但合成没成功时，单独重试合成（不重跑分段、不另收生成费）
+  template-run open-canvas <runId>      作业结束后把隐藏画布转正，回 canvasUrl（浏览器里接着改）
+  template-run webhook-redeliver <runId>
+                                        手动重投最近一次 Webhook 事件（调试用，6 次/分）
+  webhook-secret --yes                  为当前令牌生成 / 轮换 Webhook 签名密钥。明文**只显示这一次**，
+                                        旧密钥立即作废——让用户自己存好；别写进日志、终端记录、画布或仓库，
+                                        也别把密钥拼进 --webhook-url 的查询串（同账号其他令牌能看到回调地址）
 
   —— 人工介入编辑（纪律 9；需 canvas:write）——
   edit-session create <canvasId> <nodeId> [--hint "预填的要求"] [--ttl <1-15 分钟>]
@@ -6276,6 +6334,323 @@ async function cmdAgentRun(ctx, { positional, flags }) {
   fail(`未知子命令 agent-run ${sub ?? ""}（可用：start / get / approve / reject / steer / cancel）`);
 }
 
+// ---------------------------------------------------------------------------
+// 用模板出片（OpenAPI 2.63.0：templates / template-runs / webhook-secret）
+// ---------------------------------------------------------------------------
+
+const TEMPLATE_RUN_TERMINAL = new Set(["succeeded", "failed", "canceled"]);
+
+function requireUuidArg(value, what, usage) {
+  if (typeof value !== "string" || !UUID_RE.test(value)) fail(`需要 ${what}（uuid）：${usage}`);
+  return value;
+}
+
+const prettyTemplates = {
+  list: (d) =>
+    [
+      `共 ${d.total} 个（第 ${d.page} 页，每页 ${d.pageSize}）`,
+      ...(d.items ?? []).map(
+        (t) =>
+          `  ${t.id}　v${t.version}${t.featured ? "　★精选" : ""}${t.visibility ? `　${t.visibility === "private" ? "私有" : `公开${t.publicVersion ? `（公开 v${t.publicVersion}）` : ""}`}` : ""}　${t.title}${t.tags?.length ? `　[${t.tags.join(" / ")}]` : ""}`,
+      ),
+    ].join("\n"),
+  detail: (d) =>
+    [
+      `模板   ${d.title}（${d.id}）v${d.version}${d.featured ? "　★精选" : ""}${d.visibility === "private" ? "　私有（只有你能调用）" : ""}`,
+      d.description ? `说明   ${d.description}` : "",
+      `预估   ${d.estimatedCredits ?? "-"} 积分 / ${d.estimatedSeconds ?? "-"} 秒（仅供参考，以 precheck 为准）${d.compose ? "　多段合成一条" : ""}`,
+      "输入",
+      ...(d.inputs ?? []).map((i) => {
+        const choices = i.option ? `　可选 ${i.option.field}=${i.option.choices.join(" / ")}` : "";
+        const example = i.example?.text ? `　示例「${i.example.text}」` : i.example?.url ? "　有示例素材" : "";
+        return `  ${i.key}　${i.type}${i.accepts ? `(${i.accepts})` : ""}　${i.required ? "必填" : "可选"}　${i.label}${i.hint ? `：${i.hint}` : ""}${choices}${example}`;
+      }),
+      `输出   ${(d.outputs ?? []).map((o) => o.key).join(" / ") || "-"}`,
+    ]
+      .filter(Boolean)
+      .join("\n"),
+  quote: (d) =>
+    [
+      `报价   ${d.credits} 积分（整单预算上限，模板 v${d.version}）${d.billing === false ? "　计费未开启" : ""}`,
+      `余额   ${d.balance ?? "-"}`,
+      `步骤   ${d.steps} 步 / ${d.waves} 波：${(d.items ?? []).map((i) => `${i.kind}:${i.credits}`).join("　")}`,
+      d.quoteId ? `凭证   ${d.quoteId}（15 分钟有效、一次性，可用 --quote-id 带上）` : "",
+    ]
+      .filter(Boolean)
+      .join("\n"),
+  run: (d) =>
+    [
+      `作业   ${d.id}　${d.status}　进度 ${d.progress?.succeeded ?? 0}/${d.progress?.total ?? 0}${d.progress?.failed ? `（失败 ${d.progress.failed}）` : ""}`,
+      `花费   报价 ${d.credits?.quoted}${d.credits?.lastResumeQuoted != null ? `（累计 ${d.credits.quotedTotal}，最近一次继续 ${d.credits.lastResumeQuoted}）` : ""}｜已占用 ${d.credits?.spent}｜实扣 ${d.credits?.charged}${d.credits?.settling ? "（暂估，稍后结清）" : ""}`,
+      ...(d.steps ?? []).map((s) => `  #${s.index} 波${s.wave} ${s.kind}　${s.status}${s.attempts > 1 ? `　试 ${s.attempts} 次` : ""}${s.error ? `　${s.error}` : ""}`),
+      ...(d.outputs ?? []).map((o) => `输出   ${o.key}（${o.kind}）${o.assetId}`),
+      ...(d.status !== "succeeded" ? (d.segments ?? []).map((s) => `分段   ${s.order + 1}. ${s.title ?? s.key}　${s.status}${s.assetId ? `　${s.assetId}` : ""}`) : []),
+      d.film ? `成片   ${d.film.assetId}` : "",
+      d.compose?.ignored ? `合成   没有合成：${d.compose.ignored}` : "",
+      d.resume?.count ? `继续   已继续 ${d.resume.count}/${d.resume.max} 次${d.resume.lastQuoted !== null ? `，最近一次报价 ${d.resume.lastQuoted}` : ""}` : "",
+      d.error ? `错误   ${d.error.code}：${d.error.message}` : "",
+      d.canvasUrl ? `画布   ${d.canvasUrl}` : "",
+      d.webhook ? `回调   ${d.webhook.state}（${d.webhook.attempts} 次，上次 HTTP ${d.webhook.lastStatus ?? "-"}）` : "",
+    ]
+      .filter(Boolean)
+      .join("\n"),
+};
+
+/** 作业到终态后的下一步提示（stderr） */
+function afterTemplateRun(d) {
+  if (!d || !TEMPLATE_RUN_TERMINAL.has(d.status)) return;
+  const ids = [...(d.outputs ?? []).map((o) => o.assetId), ...(d.film ? [d.film.assetId] : [])];
+  if (d.status === "succeeded" && ids.length) {
+    process.stderr.write(
+      `dj: 作业成功。取件：node download.mjs --ids ${[...new Set(ids)].join(",")}（需 assets:read）` +
+        `${d.canvasUrl ? "" : `；要在浏览器里接着改：dj.mjs template-run open-canvas ${d.id}`}\n`,
+    );
+  }
+  if (d.credits?.settling) process.stderr.write("dj: 花费还是暂估（有在途任务 / 账没结完），稍后再 get 一次读结清值。\n");
+  if ((d.status === "failed" || d.status === "canceled") && d.resume?.canResume) {
+    process.stderr.write(`dj: 可以在同一个副本上继续（已完成的段不重复扣费）：先 \`dj.mjs template-run retry ${d.id}\` 报价，用户确认后加 --yes --request-id <新 uuid> --quote-id <id>。\n`);
+  }
+  if (d.status === "succeeded" && d.compose?.canRetry) {
+    process.stderr.write(`dj: 合成成片没成功（分段都在）：\`dj.mjs template-run compose ${d.id}\` 单独重试合成（不重跑分段、不另收生成费）。\n`);
+  }
+  if (d.status === "succeeded" && d.compose?.canCompose) {
+    process.stderr.write(`dj: 这条只返回了分段；要合成一条成片：\`dj.mjs template-run compose ${d.id}\`（不重跑分段、不另收生成费）。\n`);
+  }
+}
+
+function waitTemplateRun(ctx, flags, runId) {
+  return pollJob(ctx, flags, {
+    path: `/template-runs/${encodeURIComponent(runId)}`,
+    renderer: prettyTemplates.run,
+    isTerminal: (d) => TEMPLATE_RUN_TERMINAL.has(d?.status),
+    isSuccess: (d) => d?.status === "succeeded",
+    describe: (d) => `${d?.status} ${d?.progress?.succeeded ?? 0}/${d?.progress?.total ?? 0}`,
+    resumeCommand: `dj.mjs template-run get ${runId} --wait`,
+    onFinal: (d) => afterTemplateRun(d),
+  });
+}
+
+/** `--input key=value`（字符串）/ `key:=JSON`（数字等）/ `key=@文件`（读文本文件）→ 一个键值对 */
+function parseTemplateInput(spec) {
+  const typed = spec.indexOf(":=");
+  const plain = spec.indexOf("=");
+  if (typed > 0 && typed < plain + 1) {
+    const key = spec.slice(0, typed);
+    const raw = spec.slice(typed + 2);
+    try {
+      return [key, JSON.parse(raw)];
+    } catch {
+      fail(`--input ${spec}：「:=」后面要是 JSON 值（如 10）`);
+    }
+  }
+  if (plain <= 0) fail(`--input 写法是 key=value / key:=10 / key=@文件，收到：${spec}`);
+  const key = spec.slice(0, plain);
+  const value = spec.slice(plain + 1);
+  if (value.startsWith("@")) {
+    try {
+      return [key, readFileSync(value.slice(1), "utf8").trim()];
+    } catch (err) {
+      fail(`读取 ${value.slice(1)} 失败：${err instanceof Error ? err.message : "unknown"}`);
+    }
+  }
+  return [key, value];
+}
+
+/** 报价体 = 提交体共有部分：templateId / version? / inputs（-f 文件 → --inputs-json → --input 逐个覆盖） */
+async function templateRunBaseBody(positional, flags, usage) {
+  let fromFile = {};
+  if (typeof flags.file === "string") {
+    const input = await readJsonInput(flags, "模板作业请求体");
+    if (!input || typeof input !== "object" || Array.isArray(input)) fail("请求体形状不对：期待一个对象");
+    fromFile = input;
+  }
+  const templateId = requireUuidArg(positional[0] ?? fromFile.templateId, "templateId", usage);
+  let jsonInputs = {};
+  if (typeof flags["inputs-json"] === "string") {
+    try {
+      jsonInputs = JSON.parse(flags["inputs-json"]);
+    } catch {
+      fail("--inputs-json 不是合法 JSON");
+    }
+    if (!jsonInputs || typeof jsonInputs !== "object" || Array.isArray(jsonInputs)) fail("--inputs-json 要是一个对象");
+  }
+  const inputs = {
+    ...(fromFile.inputs && typeof fromFile.inputs === "object" ? fromFile.inputs : {}),
+    ...jsonInputs,
+    ...Object.fromEntries(repeatedFlagValues("input").map(parseTemplateInput)),
+  };
+  const version = flags.version !== undefined ? intFlag(flags, "version", 0) : fromFile.version;
+  return { templateId, ...(typeof version === "number" ? { version } : {}), inputs };
+}
+
+async function templateRunCreate(ctx, positional, flags) {
+  const usage = "dj.mjs template-run create <templateId> [--input key=value …] [--keep-canvas] [--webhook-url <url>] [--yes --request-id <uuid> --quote-id <id>]";
+  const base = await templateRunBaseBody(positional, flags, usage);
+  if (quoteOnly(flags)) {
+    const quoted = handle(ctx, await request(ctx, "POST", "/template-runs/precheck", base), prettyTemplates.quote);
+    process.stderr.write(
+      `dj: 以上是报价（未建作业、未扣费）。把 credits 告诉用户、等明确确认后加 --yes --request-id <uuid> --quote-id ${quoted?.quoteId ?? "<上面的 quoteId>"} 再跑同一条命令（输入保持一致）。\n`,
+    );
+    return;
+  }
+  // 与 generate / remake 同：幂等键必须由调用方生成并存下来，dj 不自动生成
+  const requestId = typeof flags["request-id"] === "string" ? flags["request-id"].trim() : "";
+  if (!UUID_RE.test(requestId)) {
+    fail("template-run create 正式提交须带 --request-id <uuid>（幂等键）。用 `dj.mjs uuid` 生成一个并存下来，失败重试时原样复用。");
+  }
+  // 不自动重新报价：用户确认的是**那一次**报价的金额，所以正式提交必须带回那次的 quoteId（输入或模板版本变了会被 409 quote_mismatch 拒）
+  const quoteId = typeof flags["quote-id"] === "string" ? flags["quote-id"].trim() : "";
+  if (!quoteId) {
+    fail("template-run create --yes 须带 --quote-id <id>：先跑 `dj.mjs template-run precheck …`（或不带 --yes 的同一条命令）报价，把金额告诉用户、确认后带回那次的 quoteId 提交。dj 不会替你重新报价后直接提交。");
+  }
+  const body = withQuoteId(
+    {
+      ...base,
+      requestId,
+      ...(flags["keep-canvas"] ? { keepCanvas: true } : {}),
+      ...(typeof flags["webhook-url"] === "string" ? { webhookUrl: flags["webhook-url"] } : {}),
+      ...composeOptions(flags),
+    },
+    quoteId,
+  );
+  const submitted = await request(ctx, "POST", "/template-runs", body);
+  const data = submitted.envelope?.data;
+  const okResponse = submitted.status >= 200 && submitted.status < 300 && submitted.envelope?.ok && typeof data?.id === "string";
+  if (!okResponse) handle(ctx, submitted, prettyTemplates.run);
+  process.stderr.write(
+    `dj: ${submitted.envelope?.meta?.replayed ? "同一 --request-id 的作业已存在（未重复扣费）" : "已建作业"} runId=${data.id}；` +
+      `查进度 \`dj.mjs template-run get ${data.id} --wait\`\n`,
+  );
+  if (flags.wait) return waitTemplateRun(ctx, flags, data.id);
+  emit(ctx, submitted.envelope, prettyTemplates.run);
+}
+
+/** 多段成片的两个可选项：--compose on|off（缺省按模板）、--segment-order key1,key2,…（只作用于本次） */
+function composeOptions(flags) {
+  const out = {};
+  if (flags.compose !== undefined) {
+    const value = String(flags.compose).trim().toLowerCase();
+    if (!["on", "off", "true", "false"].includes(value)) fail("--compose 只接受 on / off");
+    out.compose = value === "on" || value === "true";
+  }
+  if (typeof flags["segment-order"] === "string") {
+    out.segmentOrder = flags["segment-order"].split(",").map((k) => k.trim()).filter(Boolean);
+  }
+  return out;
+}
+
+/**
+ * `template-run retry <runId>`：失败 / 取消的作业在同一个副本上继续。不带 --yes 只报价（只算剩下的部分）；
+ * 正式继续必须带新的 --request-id 与那次报价的 --quote-id（与 create 同一套纪律：dj 不替你重新报价再提交）。
+ */
+async function templateRunRetry(ctx, positional, flags) {
+  const usage = "dj.mjs template-run retry <runId> [--yes --request-id <新 uuid> --quote-id <id>] [--wait]";
+  const runId = requireUuidArg(positional[0], "runId", usage);
+  const path = `/template-runs/${encodeURIComponent(runId)}/retry`;
+  if (quoteOnly(flags)) {
+    const quoted = handle(ctx, await request(ctx, "POST", `${path}/precheck`, {}), (d) =>
+      [
+        `继续报价 ${d.credits} 积分（只算剩下的 ${d.todo} 步）`,
+        `已完成   ${d.segmentsDone ?? 0}/${d.segmentsTotal ?? 0} 段（保留，不重复扣费）`,
+        d.landing?.length ? `正在落卡 ${d.landing.map((n) => n ?? "一张卡").join("、")}（已生成、已扣费，不重跑）` : "",
+        d.manual?.length ? `已有内容 ${d.manual.map((n) => n ?? "一张卡").join("、")}（不重跑）` : "",
+        d.balance !== null ? `可用余额 ${d.balance}` : "",
+      ]
+        .filter(Boolean)
+        .join("\n"),
+    );
+    process.stderr.write(
+      `dj: 以上是继续的报价（未改作业、未扣费）。把「已完成 N 段，继续需要约 X 积分」告诉用户、确认后加 --yes --request-id <新 uuid> --quote-id ${quoted?.quoteId ?? "<上面的 quoteId>"} 再跑同一条命令。\n`,
+    );
+    return;
+  }
+  const requestId = typeof flags["request-id"] === "string" ? flags["request-id"].trim() : "";
+  if (!UUID_RE.test(requestId)) fail("template-run retry 正式继续须带 --request-id <uuid>（新的幂等键，不能用建作业时那个）。用 `dj.mjs uuid` 生成并存下来，重试原样复用。");
+  const quoteId = typeof flags["quote-id"] === "string" ? flags["quote-id"].trim() : "";
+  if (!quoteId) fail("template-run retry --yes 须带 --quote-id <id>：先不带 --yes 跑同一条命令报价，用户确认后带回那次的 quoteId。");
+  const submitted = await request(ctx, "POST", path, { requestId, quoteId });
+  const data = handle(ctx, submitted, prettyTemplates.run);
+  process.stderr.write(`dj: ${submitted.envelope?.meta?.replayed ? "同一 --request-id 已经继续过（未重复扣费）" : "已继续"}；查进度 \`dj.mjs template-run get ${runId} --wait\`\n`);
+  if (flags.wait && data) return waitTemplateRun(ctx, flags, runId);
+}
+
+/** `templates list|get`：模板目录（免费，需 templates:read） */
+async function cmdTemplates(ctx, { positional, flags }) {
+  const sub = positional[0];
+  if (sub === "list") {
+    const query = new URLSearchParams();
+    // --mine：自己发布的工作流（私有与公开都列，只列已发布的；作者视图，执行当前版本）
+    if (flags.mine) query.set("scope", "mine");
+    if (flags.featured) query.set("featured", "true");
+    for (const [flag, key] of [["category", "category"], ["tag", "tag"], ["page", "page"], ["page-size", "pageSize"]]) {
+      if (typeof flags[flag] === "string") query.set(key, flags[flag]);
+    }
+    const queryString = query.toString();
+    handle(ctx, await request(ctx, "GET", `/templates${queryString ? `?${queryString}` : ""}`), prettyTemplates.list);
+    return;
+  }
+  if (sub === "get") {
+    const id = requireUuidArg(positional[1], "templateId", "dj.mjs templates get <templateId>");
+    handle(ctx, await request(ctx, "GET", `/templates/${encodeURIComponent(id)}`), prettyTemplates.detail);
+    return;
+  }
+  fail(`未知子命令 templates ${sub ?? ""}（可用：list / get）`);
+}
+
+/** `template-run precheck|create|retry|get|list|cancel|compose|open-canvas|webhook-redeliver` */
+async function cmdTemplateRun(ctx, { positional, flags }) {
+  const sub = positional[0];
+  const rest = positional.slice(1);
+  if (sub === "precheck") {
+    const base = await templateRunBaseBody(rest, flags, "dj.mjs template-run precheck <templateId> [--input key=value …]");
+    handle(ctx, await request(ctx, "POST", "/template-runs/precheck", base), prettyTemplates.quote);
+    process.stderr.write("dj: 以上是报价（未建作业、未扣费）。把 credits 告诉用户、等明确确认后用 template-run create … --yes --request-id <uuid> --quote-id <上面的 quoteId> 提交（输入保持一致，15 分钟内有效）。\n");
+    return;
+  }
+  if (sub === "create") return templateRunCreate(ctx, rest, flags);
+  if (sub === "retry") return templateRunRetry(ctx, rest, flags);
+  if (sub === "list") {
+    const limit = intFlag(flags, "limit", 10);
+    const query = new URLSearchParams({ limit: String(limit) });
+    if (flags.template !== undefined) {
+      // --template 后面没跟值会被解析成 true：报错退出，别静默退回「列出全部作业」
+      if (typeof flags.template !== "string") fail("--template 需要一个模板 id：dj.mjs template-run list --template <templateId>");
+      query.set("templateId", requireUuidArg(flags.template, "--template", "dj.mjs template-run list [--template <templateId>]"));
+    }
+    handle(ctx, await request(ctx, "GET", `/template-runs?${query.toString()}`), (d) => (d.items ?? []).map(prettyTemplates.run).join("\n\n") || "（没有作业）");
+    return;
+  }
+  const actions = { cancel: "cancel", "open-canvas": "open-canvas", "webhook-redeliver": "webhook-redeliver", compose: "compose" };
+  if (sub === "get") {
+    const runId = requireUuidArg(rest[0], "runId", "dj.mjs template-run get <runId> [--wait]");
+    if (flags.wait) return waitTemplateRun(ctx, flags, runId);
+    afterTemplateRun(handle(ctx, await request(ctx, "GET", `/template-runs/${encodeURIComponent(runId)}`), prettyTemplates.run));
+    return;
+  }
+  if (sub && actions[sub]) {
+    const runId = requireUuidArg(rest[0], "runId", `dj.mjs template-run ${sub} <runId>`);
+    const renderer = sub === "cancel" || sub === "compose" ? prettyTemplates.run : undefined;
+    const data = handle(ctx, await request(ctx, "POST", `/template-runs/${encodeURIComponent(runId)}/${actions[sub]}`, {}), renderer);
+    if (sub === "cancel" && data) process.stderr.write("dj: 已取消：没提交的步骤不再提交，已提交的生成照常跑完、照常结算（credits.settling 期间是暂估）。\n");
+    return;
+  }
+  fail(`未知子命令 template-run ${sub ?? ""}（可用：precheck / create / retry / get / list / cancel / compose / open-canvas / webhook-redeliver）`);
+}
+
+/** `webhook-secret --yes`：生成 / 轮换当前令牌的 Webhook 签名密钥（旧密钥立即作废，所以要显式 --yes） */
+async function cmdWebhookSecret(ctx, { flags }) {
+  if (!flags.yes) {
+    fail("webhook-secret 会生成新密钥并**立即作废旧密钥**（已配置旧密钥的接收方会验签失败）。确认要轮换就加 --yes。");
+  }
+  const data = handle(ctx, await request(ctx, "POST", "/webhook-secret", {}));
+  if (data?.secret) {
+    process.stderr.write(
+      "dj: 上面的 secret 明文**只显示这一次**——让用户立刻存进接收方的密钥配置，别写进日志、画布或代码仓库。" +
+        `验签：${data.signatureHeader} = t=<unix 秒>,v1=HMAC-SHA256(secret, "<t>.<请求体原文>")，时间窗 ${data.toleranceSeconds} 秒，按事件 id 去重。\n`,
+    );
+  }
+}
+
 const COMMANDS = {
   login: cmdLogin,
   logout: cmdLogout,
@@ -6302,6 +6677,9 @@ const COMMANDS = {
   rewrite: cmdRewrite,
   agents: cmdAgents,
   "agent-run": cmdAgentRun,
+  templates: cmdTemplates,
+  "template-run": cmdTemplateRun,
+  "webhook-secret": cmdWebhookSecret,
   chat: cmdChat,
   chats: cmdChats,
   "edit-session": cmdEditSession,

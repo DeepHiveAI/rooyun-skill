@@ -91,6 +91,14 @@ HTTP 状态码恒为 200**，真实状态码改放在信封的 `meta.httpStatus`
 | `agent_run_plan_only` | 409 | 只出计划的委托 run（`autoGenerate:false`）批准了花钱的动作。**未执行、没有扣费**。先问用户要不要花钱：同意就 `dj agent-run steer <runId> --auto-generate "…" --yes` 升级后逐项报价确认；不同意就 reject。别自作主张升级 |
 | `agent_run_unavailable` | 403 | 创作助手对这个账号暂不可用（灰度 / 平台暂停）。令牌没问题，重建令牌没用：如实告诉用户，改用原子命令（ops + 逐项 generate）或稍后再试 |
 | `agent_run_limit_exceeded` | 429 | 这枚令牌的委托 run 数量到上限。**未执行、没有扣费**。`meta.kind=daily_runs`（今天新建满 30 个）→ 在已有 run 上 `dj agent-run steer` 继续或明天再开；`active_runs`（同时在跑满 3 个）→ `dj agent-run get <runId> --wait` 等其中一个这一轮跑完。别换令牌绕过 |
+| `template_runs_disabled` | 403 | 按模板出片还没对这个账号开放（灰度）。**未执行、没有扣费**。令牌没问题、重建令牌没用：如实告诉用户；已有作业照样能查、能取消 |
+| `template_version_superseded` | 409 | 指定的模板版本不是当前版本（`meta.currentVersion`）。**未执行、没有扣费**。`dj templates get` 看新版输入有没有变，按当前版本重新报价确认 |
+| `template_input_invalid` | 422 | 模板输入不合法（缺必填 / 未知键 / 类型不符 / 素材不属于你 / 选项值不在可选值里）。**未执行、没有扣费**。按 `meta.issues` 逐条改，数字选项用 `--input key:=10` |
+| `template_not_runnable` | 422 | 模板当前没法在服务端执行（`meta.reason`）。**未执行、没有扣费**。不是参数问题，换模板或把原因码告诉平台方 |
+| `template_run_limit_exceeded` | 429 | 模板作业数量到上限（`meta.kind`：`account_active` / `token_active` 同时在跑满 3 个，`token_daily` 今天新建满 50 个）。**未执行、没有扣费**。等在跑的结束或明天再来，别换令牌绕过 |
+| `template_run_state` | 409 | 作业状态不受理这个动作（已结束再取消 / 执行中就转正 / 没有可重投的 Webhook 事件）。**未执行、没有扣费**。`dj template-run get` 看状态再操作 |
+| `webhook_secret_missing` | 409 | 带 `--webhook-url` 提交，但这枚令牌还没有 Webhook 签名密钥。**未执行、没有扣费**。先 `dj webhook-secret --yes`，或去掉回调改用 `--wait` 轮询 |
+| `request_id_conflict` | 409 | 同一个 requestId 已用于另一组参数。**未执行、没有扣费**。网络重试参数要原样；新的提交换新 uuid |
 | `conversation_busy` | 409 | 多轮会话正被另一个写方占用（`meta.lockedBy`：`api` = 上一轮还没跑完 / `web` = 用户正在网页端写同一段）。按 `meta.retryAfterSeconds` 退避，**同一个 `conversationId` + 同一个 `requestId` 原样重发**。这一轮还没扣钱；**别新建会话、别并发再打一轮**（纪律 13） |
 | `agent_not_conversational` | 400 | 该 Agent 开不了会话（编排型，要在画布里跑）。`dj agents` 里挑 `conversational: true` 的，别换个 id 盲试 |
 | `agent_unknown` | 400 | `agentId` 不在目录里、已下线，或这段会话没绑定 Agent。先 `dj agents` 抄准 id——会话建好后 Agent **不可改**，换 Agent = 新建一段会话 |

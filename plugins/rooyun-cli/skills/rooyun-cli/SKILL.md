@@ -1,7 +1,7 @@
 ---
 name: rooyun-cli
-version: 1.62.1
-releasedAt: 2026-11-19
+version: 1.64.0
+releasedAt: 2026-11-20
 description: RooYun 精简版（CLI 自由模式）：只告诉你终端里的 dj.mjs 能调哪些能力、各产出什么——文生图、图生图/编辑、图生视频、首尾帧、参考图生视频、数字人口播、配音、音乐、音效、视频高清、视频转白模、上传素材、下载产物，以及可选的画布读写和平台 LLM 辅助（提示词优化、参考图/参考片反推提示词、剧本拆解）。不预设创作流程：提示词怎么写、先做什么后做什么、用哪个模型、要不要画布，全由用户决定。当用户说「用 RooYun 生成一张图 / 一段视频」「我自己写提示词」「别走固定流程」「直接调 RooYun 的工具」「rooyun-cli」，或提到 RooYun、ROOYUN_API_TOKEN 且想自己掌控创作时使用。生成会花用户的真钱，任何生成前先报价并等用户确认。
 ---
 
@@ -100,7 +100,7 @@ dj generate --request-id "$RID" --model … --capability … --params-json '{…
 dj models --capability t2i --pretty          # 有哪些模型、单价多少（pricing 为 null = 未配价，提交必被拒）
 dj voices --q 温暖少女 --pretty               # 配音前挑音色（voiceId 原样回传，别 trim；带 expiresAt 的 GM 设计音色 30 天到期）
 dj voices --q ja-jp --pretty                  # GM 地区音色（2000+，外语口音，没有中文）排在最末，按语种圈：--q 日语 / ja-jp
-dj upload ./ref.png                           # 本地素材 → assetId（≤50MB）；所有素材参数都只收 assetId
+dj upload ./ref.png                           # 本地素材 → assetId（≤200MB）；所有素材参数都只收 assetId
 RID=$(dj uuid)
 dj generate --request-id "$RID" --model "$MODEL" --capability t2i \
   --params-json '{"prompt":"<用户的提示词，原样>","size":"1k"}' --pretty
@@ -132,6 +132,7 @@ node "$SKILL/scripts/download.mjs" --asset <assetId> --out ./out --pretty
 - **任务**：`dj tasks`（在途）· `dj cancel <taskId>`（只有排队中的能真停）
 - **抖音素材**：`dj video-url <单条视频分享链接>` → 视频直链，`curl -L` 下到本地看片（不花钱）
 - **换人重演**：`dj remake --source <视频assetId> --keyframe <参考帧assetId>[:帧位[:序号@x]]`（1–2 人，保留场景 / 动作 / 原声；参考帧要先用 t2i + 源帧 + 角色图画好；不带 `--yes` 只报价，正式提交带 `--request-id`；查进度 `dj task <taskId>`）
+- **用模板出片**：`dj templates list` / `dj templates get <templateId>`（看输入，需 templates:read）→ `dj template-run precheck <templateId> --input key=value …`（报价，不扣费）→ 用户确认后 `dj template-run create <templateId> … --yes --request-id <uuid> --wait`（扣积分）→ `node "$SKILL/scripts/download.mjs" --ids <assetId>` 取成片；数字选项写 `--input duration:=10`；`dj template-run open-canvas <runId>` 把隐藏画布转正
 - **爆款复刻 → 剪映草稿**：`dj video-analyze <链接> --quote`（报价，确认后去掉 `--quote` 提交）→ `dj recreate <canvasId> --analysis <id>`（免费落卡、不生成）→ 出片 → `node "$SKILL/scripts/download.mjs" --jianying <canvasId> --group <groupId>`（导出剪映草稿）
 - **多轮 Agent 会话**、**选题情报**（简报 / 雷达 / 文案库）、**参考视频拆解**：见 `dj --help` 对应段落
 
@@ -203,7 +204,7 @@ dj canvas structure <canvasId> --pretty            # 读回结构拿 nodeId / as
 
 - **API 拼不了成片**：只能做到「每段一个视频」。要整片，请用户在画布上点「合成成片」，
   或你把各段下载后用本机 ffmpeg 拼。
-- **单个上传 ≤ 50MB**：更大的视频先在本地压缩（白模/动作参考压到 720p 就够）。
+- **单个上传 ≤ 200MB**：更大的视频先在本地压缩（白模/动作参考压到 720p 就够）。
 
 ## 错误速查
 

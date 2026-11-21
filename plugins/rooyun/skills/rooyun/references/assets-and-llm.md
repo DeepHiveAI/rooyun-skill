@@ -18,7 +18,7 @@ ASSET=$(dj upload ./ref.png | jq -r '.data.assetId')
 - **幂等**：`assetId` = 内容 sha256，同一份字节传多少次都只有一个 id、只占一份存储。
   重传不是错误，会正常返回并把 `deduplicated` 标成 `true`。断点重试可以放心重传。
   反过来说，**改一个字节就是另一个资产**，没有「覆盖已有 assetId」这回事。
-- 单文件 ≤ **50MB**（超了 413），每令牌每天 **1 GiB**（超了 429）。
+- 单文件 ≤ **200MB**（超了 413），每令牌每天 **1 GiB**（超了 429）。
   回执 `meta.uploadQuotaRemainingBytes` 给剩余额度。
 - 类型**按文件魔数判定，不看扩展名也不看你声明的 Content-Type**：图片 png/jpeg/webp/gif，
   视频 mp4/webm/quicktime，音频 mpeg/wav/mp4/ogg。**SVG 一律不受理**。

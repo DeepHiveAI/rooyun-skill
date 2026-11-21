@@ -1,8 +1,8 @@
 ---
 name: rooyun
-version: 1.62.1
-releasedAt: 2026-11-19
-description: 用自然语言驱动 RooYun（短剧 AI 创作工作台）的开放 API：建项目与无限画布、按「剧本 → 角色/场景/道具 → 分镜视频卡 → 生成」的固定顺序搭画布、用平台 LLM 把小说改成分集剧本、把剧本按导演式拆镜拆成结构化的角色/场景/道具/分镜再落成卡片、调模型生成图片视频音频并自动落回卡片、把一段现成视频里的 1–2 个人换成你的角色重演（保留场景与原声）、把一段现成视频转成白模再让新角色复刻它的动作与运镜、把一整件多步创作任务委托给站内画布创作助手（花钱的每一步仍由用户逐项批准）、反推参考素材的提示词、质检分镜图、下载产物到本地、把抖音视频分享链接解析成可直接下载的视频直链，供本地看片做对标分析；以及选题情报一条链：读每日频道简报（选题 + 「AI 数字人做不做得了」的可执行性判断 + 对标参考）、订阅对标博主并按增速看谁在起来、查热榜与每日选题报告、检索文案库看别人的爆款是怎么写的（钩子/段落节奏/CTA）。当用户说「用 RooYun 生成分镜 / 把我的剧本做成视频工程 / 拆一下这个剧本的角色 / 在 RooYun 里建个项目 / 把这段视频换成我的角色重演 / 换人重演 / 把这本小说改成剧本 / 小说改剧本 / 导演式拆镜 / 下载我 RooYun 项目的产物 / 查我 RooYun 还剩多少积分 / 帮我把这条抖音视频下下来看看 / 抓一下这个抖音博主的视频 / 今天做什么选题 / 帮我盯着这几个对标博主 / 别人这条爆款是怎么写的 / 看看今天的选题简报」，或提到 RooYun、rooyun.com、ROOYUN_API_TOKEN 时使用本技能。生成类会花用户的真钱，任何生成前必须先报价并等用户确认；选题情报那条链全部只读、不扣积分。
+version: 1.64.0
+releasedAt: 2026-11-20
+description: 用自然语言驱动 RooYun（短剧 AI 创作工作台）的开放 API：建项目与无限画布、按「剧本 → 角色/场景/道具 → 分镜视频卡 → 生成」的固定顺序搭画布、用平台 LLM 把小说改成分集剧本、把剧本按导演式拆镜拆成结构化的角色/场景/道具/分镜再落成卡片、调模型生成图片视频音频并自动落回卡片、把一段现成视频里的 1–2 个人换成你的角色重演（保留场景与原声）、把一段现成视频转成白模再让新角色复刻它的动作与运镜、把一整件多步创作任务委托给站内画布创作助手（花钱的每一步仍由用户逐项批准）、套用平台的画布模板一键出片（填素材 → 报价 → 按模板执行 → 取成片）、反推参考素材的提示词、质检分镜图、下载产物到本地、把抖音视频分享链接解析成可直接下载的视频直链，供本地看片做对标分析；以及选题情报一条链：读每日频道简报（选题 + 「AI 数字人做不做得了」的可执行性判断 + 对标参考）、订阅对标博主并按增速看谁在起来、查热榜与每日选题报告、检索文案库看别人的爆款是怎么写的（钩子/段落节奏/CTA）。当用户说「用 RooYun 生成分镜 / 把我的剧本做成视频工程 / 拆一下这个剧本的角色 / 在 RooYun 里建个项目 / 把这段视频换成我的角色重演 / 换人重演 / 用模板给我的商品出一条 / 有哪些现成模板 / 把这本小说改成剧本 / 小说改剧本 / 导演式拆镜 / 下载我 RooYun 项目的产物 / 查我 RooYun 还剩多少积分 / 帮我把这条抖音视频下下来看看 / 抓一下这个抖音博主的视频 / 今天做什么选题 / 帮我盯着这几个对标博主 / 别人这条爆款是怎么写的 / 看看今天的选题简报」，或提到 RooYun、rooyun.com、ROOYUN_API_TOKEN 时使用本技能。生成类会花用户的真钱，任何生成前必须先报价并等用户确认；选题情报那条链全部只读、不扣积分。
 ---
 
 # RooYun 开放 API
@@ -26,6 +26,7 @@ RooYun 是「无限画布 + AI Agent」的短剧创作工作台。你通过 v1 �
 | 加工文案 | 按要求改写、口语描述转电影级生图提示词、中译英、给剧情写主题曲歌词 |
 | **多轮 Agent 会话** | 跟目录里的 Agent（萌宠文案、剧本医生…）开一段**服务端持有历史**的会话：每轮只发新的一句话，拿回 A/B 双稿全文，指定其中一稿继续改（见「多轮 Agent 会话」章，纪律 13） |
 | **委托创作助手** | 把多步的画布创作（从剧本搭整套画布、按分镜批量出图出片）整件交给站内画布创作助手：`dj agent-run start`，助手在画布上读卡、搭卡、写提示词，花钱的每一步停下来等**用户本人逐项批准**（缺省只出计划）。原子命令留给精修（见「委托模式」章，[`references/agent-runs.md`](references/agent-runs.md)） |
+| **用模板出片** | 平台精选的画布模板（调好的工作流 + 声明好的输入）：填素材与文字 → `dj template-run precheck` 报价 → 用户确认后 `create --yes --request-id` → 轮询或接 Webhook → 取成片；可选把隐藏画布转正给用户接着改（★收费、默认只报价，见「用模板出片」章，[`references/templates.md`](references/templates.md)） |
 | 读素材出提示词 | 参考图 → 画面描述；参考片（自己抽好的 2–8 帧）→ 完整镜头脚本 |
 | 质检产物 | 判分镜图有没有崩坏、人物像不像定妆照、拍出来是不是导演要的 |
 | 读画布 | 读整张结构（总览，含每张卡的落位坐标），或详读单卡（正文全文 + 可写参数 + 上下游 + 多版产物；存量分镜表卡另出全部行） |
@@ -67,12 +68,12 @@ RooYun 是「无限画布 + AI Agent」的短剧创作工作台。你通过 v1 �
   别让他等到最后才发现还得自己剪。要交付成片有两条路：请用户在画布上点「合成成片」
   自行下载；或者你把各镜视频下载到本地，用**你自己环境里的 ffmpeg** 拼——
   配方见文末「附：本地拼接成片」（你的 ffmpeg 是原生的，比浏览器里那份 wasm 快得多）。
-- **超过 50MB 的外部视频带不进来**。`POST /v1/assets` 单文件上限 50MB 且无分片续传，
-  而 2 分钟 1080p 的片子通常 100MB 以上。这会挡死三条自然诉求：
+- **超过 200MB 的外部视频带不进来**。`POST /v1/assets` 单文件上限 200MB 且无分片续传，
+  而较长的 1080p / 4K 原片很容易超过这个大小。这会挡住三条自然诉求：
   `upscale` 的 `params.video`（把用户拍的片子拿来高清化）、`avatar` 的
   `params.motionVideo`（用一段参考动作驱动数字人）与 `blockout` 的
   `params.sourceVideo`（把用户的原片转白模换角）。素材超限时如实告诉用户，
-  并给出可行的替代：先在本地压到 50MB 以内（白模只要几何，压到 720p 也够用），
+  并给出可行的替代：先在本地压到 200MB 以内（白模只要几何，压到 720p 也够用），
   或改用平台内已生成的视频（那些不必上传）。
 
 ## 前置配置：登录一次，之后所有会话自动可用
@@ -273,7 +274,7 @@ dj tasks --request "$RID" --pretty      # 幂等键还在、只是丢了 taskId
 ### 7. 下载后核对完整性元信息，缺失项如实报告
 
 `download.mjs` 会打印 `referenced / cloud_available / missing`。
-**API 看到的是云端子集**：用户浏览器里没推上云的编辑、超 50MB 的资产、上传还在队列里的，
+**API 看到的是云端子集**：用户浏览器里没推上云的编辑、超 200MB 的资产、上传还在队列里的，
 API 一概看不见。
 
 有 `missing` 就照实说，并给出真正的处置。**服务端侧 `missing[].reason` 目前恒为
@@ -858,6 +859,37 @@ dj agent-run cancel <runId>
 - 交付时照纪律 6 汇报画布链接：助手的产物都在画布上，用户可以打开浏览器接着改。
 - 细节（视图字段、待批项类型、状态机、插话与取消语义）见 [`references/agent-runs.md`](references/agent-runs.md)。
 
+## 用模板出片（填素材 → 报价 → 执行 → 取成片）
+
+平台把调好的工作流画布发布成**模板**。用户要「用这个模板给我的商品出一条」这类固定套路的成片时，用模板最省事——
+你只填输入，服务端在本账号下复制一张隐藏画布、按依赖分波执行，跑完给成片 assetId。
+
+```sh
+# 1) 挑模板、看要哪些输入（免费，需 templates:read）
+dj templates list --featured --pretty
+dj templates get <templateId> --pretty
+# 2) 本地素材先上传拿 assetId
+dj upload ./product.png
+# 3) 报价（不扣费）：把 credits 原样告诉用户、记下 quoteId，等明确确认（纪律 1）
+dj template-run precheck <templateId> --input product=<assetId> --input selling_point="……" --input duration:=10 --pretty
+# 4) 确认后提交：带回用户确认的那次 quoteId（必填，dj 不替你重新报价）；requestId 自己生成并记下来；输入与报价时一致
+dj template-run create <templateId> --input product=<assetId> --input selling_point="……" --input duration:=10 \
+  --yes --request-id "$(dj uuid)" --quote-id <quoteId> --wait --pretty
+# 5) 取件：outputs[].assetId / film.assetId
+node "$SKILL/scripts/download.mjs" --ids <assetId>
+# 6) 用户想接着改：作业结束后转正隐藏画布，按纪律 6 汇报 canvasUrl
+dj template-run open-canvas <runId>
+```
+
+- **报价用 precheck 的数**，不用详情里的 `estimatedCredits`（那只是作者发布时的预估）；`credits` 是整单预算上限。
+- **requestId 必填、重试复用**（纪律 4）：网络中断原样重发不会重复扣费；丢了 runId 用 `dj template-run list` 找回，别重新提交。
+- 选项输入的 `durationSec` 是数字（`--input duration:=10`），画幅是字符串；素材必须是本账号上传的、类型一致，否则 422 `template_input_invalid`（看 `meta.issues`）。
+- 403 `template_runs_disabled` = 这个账号还没开放按模板执行（灰度），令牌没问题，如实告诉用户。
+- 取消（`dj template-run cancel`）只停没提交的步骤，已提交的生成照常结算。
+- **自己的工作流**：在画布上把一张画布发布成工作流（发布给自己用免审核），就能用自己的令牌调用它——`dj templates list --mine` 列出（私有的只有你能看到、能执行，执行的是你最新发布的版本），之后 `templates get` / `template-run precheck` / `create` 的用法与公开模板完全一样；`dj template-run list --template <templateId>` 只列这个模板的作业。别人的私有工作流一律 404。
+- 失败或取消后可以**继续**（同一副本、已完成的段不重复扣费，最多 3 次）：先 `dj template-run retry <runId>` 报价，用户确认后加 `--yes --request-id <新 uuid> --quote-id <id>`；多段视频合成没成功用 `dj template-run compose <runId>`。详见 [`references/templates.md`](references/templates.md)。
+- 合作方系统要回调就用 Webhook（`dj webhook-secret --yes` 生成密钥，明文只显示一次、别写进日志；提交带 `--webhook-url`，只收 443 端口的 https 公网地址，别把密钥放进地址的查询串）。验签与字段见 [`references/templates.md`](references/templates.md)。
+
 ---
 
 ## 参考文档（`references/`，按需读，不必全读）
@@ -878,6 +910,7 @@ dj agent-run cancel <runId>
 | [`references/assets-and-llm.md`](references/assets-and-llm.md) | 传本地文件、请用户涂蒙版、读剧本出结构、改文案 |
 | [`references/agent-conversations.md`](references/agent-conversations.md) | 跟目录里的 Agent 开多轮会话（纪律 13） |
 | [`references/agent-runs.md`](references/agent-runs.md) | 把多步画布创作委托给创作助手（`dj agent-run`）：视图字段、待批项与 quoteId、插话 / 取消语义、错误码 |
+| [`references/templates.md`](references/templates.md) | 用平台画布模板出片（`dj templates` / `dj template-run`）：输入写法、报价与上限、作业视图、Webhook 验签、错误码 |
 | [`references/creator-analysis.md`](references/creator-analysis.md) | 拆解对标博主；把抖音链接下到本地看片（纪律 15） |
 | [`references/reference-video.md`](references/reference-video.md) | 用户给了一条爆款/对标视频要照着做：拿分段实现账 → 读懂功能序列 → **`reference-frames` 亲眼复核** → 写三份文件 → 按可换/必保维度改编落画布 |
 | [`references/topic-intel.md`](references/topic-intel.md) | 用户问「今天做什么选题 / 帮我盯着这几个对标博主 / 别人这条是怎么写的」；订阅博主、读日报热榜、读每日简报、检索文案库 |

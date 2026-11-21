@@ -22,7 +22,7 @@
 
 ```sh
 # ① 原片换 assetId：画布上已生成的片直接从 canvas structure 的 assetIds 取；
-#    用户本地的片先上传（≤50MB；白模只要几何，先压到 720p 完全够用）
+#    用户本地的片先上传（≤200MB；白模只要几何，先压到 720p 完全够用）
 SRC=$(dj upload ./ref.mp4 | jq -r '.data.assetId')
 
 # ② 转白模。按源片秒计价（单价以 precheck 报价为准，实扣看 meta.credits），先报价（纪律 1）：

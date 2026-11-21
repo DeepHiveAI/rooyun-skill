@@ -18,7 +18,7 @@
 参考帧按正常价自己生成：
 
 ```sh
-# ① 源视频换 assetId（≤50MB）；在本机用 ffmpeg 抽出要钉的那一帧（第 0 帧或第 N 秒）
+# ① 源视频换 assetId（≤200MB）；在本机用 ffmpeg 抽出要钉的那一帧（第 0 帧或第 N 秒）
 SRC=$(dj upload ./source.mp4 | jq -r '.data.assetId')
 ffmpeg -ss 0 -i ./source.mp4 -frames:v 1 ./frame0.png
 FRAME0=$(dj upload ./frame0.png | jq -r '.data.assetId')
